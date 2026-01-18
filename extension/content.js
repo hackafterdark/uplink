@@ -147,6 +147,15 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       respond("Clicked");
     }
     else if (request.action === 'type') {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const rect = el.getBoundingClientRect();
+
+      let label = `Typing: ${request.text}`;
+      if (el.type === 'password') {
+        label = "Typing: ••••••••";
+      }
+      createOverlay(rect, label);
+
       el.value = request.text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
