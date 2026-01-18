@@ -11,6 +11,8 @@ let allowLocalFiles = false; // Default: Block file://
 let userBlocklist = []; // User-defined glob patterns
 let lastCommandTime = 0;
 let rateLimitMs = 500; // Default 500ms
+let serverPort = 8765; // Default Port
+
 const MAX_TYPE_LENGTH = 10000;
 const MAX_SCRIPT_LENGTH = 100000;
 
@@ -18,11 +20,12 @@ const MAX_SCRIPT_LENGTH = 100000;
 const RESTRICTED_PROTOCOLS = ['chrome:', 'edge:', 'about:', 'brave:', 'opera:'];
 
 // Load saved security settings
-api.storage.local.get(['allowLocalFiles', 'userBlocklist', 'panicMode', 'rateLimitMs'], (result) => {
+api.storage.local.get(['allowLocalFiles', 'userBlocklist', 'panicMode', 'rateLimitMs', 'serverPort'], (result) => {
   if (result.allowLocalFiles !== undefined) allowLocalFiles = result.allowLocalFiles;
   if (result.userBlocklist !== undefined) userBlocklist = result.userBlocklist;
   if (result.panicMode !== undefined) panicMode = result.panicMode;
   if (result.rateLimitMs !== undefined) rateLimitMs = result.rateLimitMs;
+  if (result.serverPort !== undefined) serverPort = result.serverPort;
 });
 
 // Helper: Glob to Regex
@@ -62,14 +65,20 @@ function checkUrlAllowed(url) {
     return { allowed: true };
   }
 }
-const socketUrl = 'ws://127.0.0.1:8765?token=mcp-browser-bridge-secret';
+
+// Dynamic Socket URL
+function getSocketUrl() {
+  return `ws://127.0.0.1:${serverPort}?token=mcp-browser-bridge-secret`;
+}
+
+// remove const socketUrl = ... we use getSocketUrl() now
 let manualDisconnect = false;
 
 function connect() {
   if (manualDisconnect) return;
 
-  broadcastLog("SYSTEM", "Attempting WebSocket connection...");
-  socket = new WebSocket(socketUrl);
+  broadcastLog("SYSTEM", `Attempting WebSocket connection to port ${serverPort}...`);
+  socket = new WebSocket(getSocketUrl());
 
   socket.onopen = () => {
     console.log('Connected to MCP Server');
@@ -185,6 +194,22 @@ chrome.runtime.onConnect.addListener((port) => {
           api.storage.local.set({ rateLimitMs: rateLimitMs });
           broadcastState();
         }
+        if (msg.type === "SET_PORT") {
+          const newPort = parseInt(msg.value);
+          if (!isNaN(newPort) && newPort !== serverPort) {
+            serverPort = newPort;
+            api.storage.local.set({ serverPort: serverPort });
+            broadcastLog("SYSTEM", `Port changed to ${serverPort}. Reconnecting...`);
+
+            // Force reconnect
+            if (socket) {
+              try { socket.close(); } catch (e) { }
+              socket = null;
+            }
+            manualDisconnect = false;
+            connect();
+          }
+        }
         if (msg.type === "SET_LOCAL_FILES") {
           allowLocalFiles = msg.value;
           api.storage.local.set({ allowLocalFiles: allowLocalFiles });
@@ -240,6 +265,7 @@ function broadcastState() {
     allowLocalFiles: allowLocalFiles,
     userBlocklist: userBlocklist,
     rateLimitMs: rateLimitMs,
+    serverPort: serverPort,
     logs: logHistory
   };
   for (const port of dashboardPorts) {

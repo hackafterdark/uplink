@@ -10,6 +10,7 @@ Uplink allows your AI coding assistant or agent to:
 *   **Debug** web applications (Read Console logs, LocalStorage).
 *   **Record** your sessions (Video recording via `tabCapture`).
 *   **Automate** complex workflows across multiple tabs and frames.
+*   **Scale** with Multi-Agent support (Run multiple independent browser sessions on different ports).
 
 It consists of two parts:
 1.  **Python MCP Server**: Runs locally, exposing "Tools" to your AI.
@@ -55,18 +56,47 @@ The server will start on `ws://127.0.0.1:8765`.
 5.  Select the `extension/` folder inside this project.
 
 ### 3. Connect your AI
-Add the MCP server to your AI agent configuration (e.g., Claude Desktop config):
+Add the MCP server to your AI agent configuration (e.g., Claude Desktop config or custom MCP client).
 
+**Basic Configuration (Default Port 8765):**
+*(Windows)*
 ```json
 {
   "mcpServers": {
     "uplink": {
-      "command": "python",
-      "args": ["/path/to/uplink/server.py"]
+      "command": "f:/browser-tool/start_server.bat",
+      "args": []
     }
   }
 }
 ```
+*(macOS / Linux)*
+```json
+{
+  "mcpServers": {
+    "uplink": {
+      "command": "/path/to/browser-tool/start_server.sh",
+      "args": []
+    }
+  }
+}
+```
+
+**Advanced Configuration (Custom Port):**
+If you need to run multiple instances or avoid port conflicts, pass the `--port` argument.
+
+```json
+{
+  "mcpServers": {
+    "uplink-secondary": {
+      "command": "f:/browser-tool/start_server.bat",
+      "args": ["--port", "8766"]
+    }
+  }
+}
+```
+*Note: If you change the server port, remember to update the **Server Port** setting in the Browser Extension Dashboard to match.*
+*Note on Scripts: The provided `start_server` scripts are designed to simply launch the Python process. For multi-agent setups, we disabled the auto-kill feature so multiple instances can run side-by-side.*
 
 ## 🛡️ Security
 
@@ -82,6 +112,16 @@ Click the extension icon to open the **Uplink Control** dashboard.
 *   **Activity Log**: See exactly what the AI is doing in real-time.
 *   **Panic Button**: Stop the AI immediately.
 *   **Security Settings**: Configure rate limits and blocklists.
+
+## 🌐 Multi-Browser Support
+
+Uplink supports having the extension installed in multiple browsers (e.g., Chrome, Edge, Firefox) simultaneously, but **only one browser can be connected to the AI at a time**.
+
+**How to manage connections:**
+1.  **Dashboard Status**: The extension popup shows a status badge (Green for **Connected**, Red for **Disconnected**).
+2.  **Toggle Connection**: Click the badge to manually Connect or Disconnect that specific browser.
+3.  **Last One Wins**: If you open a new browser or reload the extension, it will automatically claim the connection, disconnecting any other active browser.
+4.  **Exclusive Control**: The AI will only send commands (navigation, clicks, etc.) to the currently connected browser. The disconnected browser will remain completely passive.
 
 ---
 *Created by HackAfterDark*

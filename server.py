@@ -87,10 +87,30 @@ async def handler(websocket):
                 browser_socket = None
         logging.info("❌ Browser Disconnected")
 
+# --- CLI Args ---
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--port", type=int, default=8765, help="WebSocket server port")
+# Use parse_known_args to avoid conflict with MCP's own CLI args if any
+args, unknown = parser.parse_known_args()
+PORT = args.port
+
+# Fallback: If port is still default, check if user passed a bare number in args (e.g. ["8766"] or ["port", "8766"])
+if PORT == 8765 and unknown:
+    for arg in unknown:
+        try:
+            val = int(arg)
+            if 1024 < val < 65536:
+                PORT = val
+                logging.info(f"Found loose port argument: {PORT}")
+                break
+        except ValueError:
+            pass
+
 async def start_ws():
-    logging.info("Starting WebSocket server on port 8765 (ws://127.0.0.1:8765)...")
+    logging.info(f"Starting WebSocket server on port {PORT} (ws://127.0.0.1:{PORT})...")
     # Aggressive keep-alive (5s ping) to keep Service Worker alive
-    async with websockets.serve(handler, "127.0.0.1", 8765, ping_interval=5, ping_timeout=10):
+    async with websockets.serve(handler, "127.0.0.1", PORT, ping_interval=5, ping_timeout=10):
         await asyncio.Future()  # Run forever
 
 # --- MCP Lifecycle ---

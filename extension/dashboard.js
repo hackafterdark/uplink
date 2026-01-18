@@ -10,6 +10,7 @@ const blocklistInput = document.getElementById('blocklistInput');
 const addBlockBtn = document.getElementById('addBlockBtn');
 const blocklistEl = document.getElementById('blocklist');
 const rateLimitInput = document.getElementById('rateLimitInput');
+const portInput = document.getElementById('portInput');
 
 // --- Helper: Format Time ---
 function getTime() {
@@ -177,6 +178,15 @@ rateLimitInput.addEventListener('change', (e) => {
   port.postMessage({ type: "SET_RATE_LIMIT", value: val });
 });
 
+if (portInput) {
+  portInput.addEventListener('change', (e) => {
+    let val = parseInt(e.target.value);
+    if (val > 1024 && val < 65536) {
+      port.postMessage({ type: "SET_PORT", value: val });
+    }
+  });
+}
+
 // Connection Toggle (Clicking the Status Badge)
 statusEl.addEventListener('click', () => {
   port.postMessage({ type: "TOGGLE_CONNECTION" });
@@ -220,6 +230,12 @@ function updateConnectionButton(connected) {
 // Hook into state updates
 port.onMessage.addListener((msg) => {
   if (msg.type === "STATE_UPDATE") {
-    // Status update handled above in existing code
+    // Other status updates handled above
+    if (msg.state.rateLimitMs) {
+      rateLimitInput.value = msg.state.rateLimitMs;
+    }
+    if (msg.state.serverPort && portInput) {
+      portInput.value = msg.state.serverPort;
+    }
   }
 });

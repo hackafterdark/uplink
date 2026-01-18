@@ -4,7 +4,7 @@
 
 echo "Stopping any existing Uplink server instances..."
 # Kill processes matching "server.py" to release the port
-pkill -f "python.*server.py" 2>/dev/null
+# pkill -f "python.*server.py" 2>/dev/null
 
 echo "Starting Uplink Server..."
 
@@ -16,4 +16,4 @@ else
 fi
 
 # Run the server
-$PYTHON_CMD server.py
+$PYTHON_CMD server.py "$@"

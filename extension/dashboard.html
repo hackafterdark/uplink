@@ -214,8 +214,15 @@
       
       <!-- Rate Limit UI -->
       <div class="control-row" style="margin-top: 10px;">
-          <label for="rateLimitInput" style="font-size: 13px;">Rate Limit (ms)</label>
-          <input type="number" id="rateLimitInput" min="0" max="5000" step="100" style="padding: 4px; width: 60px; border-radius: 4px; border: 1px solid #444; background: #222; color: #fff;">
+          <div class="control-group">
+      <label class="control-label">Rate Limit (ms)</label>
+      <input type="number" id="rateLimitInput" class="input-field" value="500" min="0" step="100">
+    </div>
+
+    <div class="control-group">
+      <label class="control-label">Server Port</label>
+      <input type="number" id="portInput" class="input-field" value="8765" min="1024" max="65535">
+    </div>
       </div>
   </section>
 
