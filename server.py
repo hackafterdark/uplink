@@ -4,7 +4,9 @@ import websockets
 import json
 import base64
 import base64
+import base64
 import os
+import pathlib
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -88,13 +90,6 @@ async def handler(websocket):
         logging.info("❌ Browser Disconnected")
 
 # --- CLI Args ---
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("--port", type=int, default=8765, help="WebSocket server port")
-# Use parse_known_args to avoid conflict with MCP's own CLI args if any
-args, unknown = parser.parse_known_args()
-PORT = args.port
-
 # Fallback: If port is still default, check if user passed a bare number in args (e.g. ["8766"] or ["port", "8766"])
 if PORT == 8765 and unknown:
     for arg in unknown:
@@ -106,6 +101,45 @@ if PORT == 8765 and unknown:
                 break
         except ValueError:
             pass
+
+# CLI Args: Downloads Directory
+parser.add_argument("--downloads", type=str, default=None, help="Directory to save screenshots and recordings")
+# Re-parse to catch new arg if explicitly provided (ignoring the previous parse_known_args limitation for simplicity here, 
+# but effectively we should just reuse 'args' if we defined it earlier. However, since we defined 'parser' above, 
+# we can just add the argument now and re-parse or check 'unknown' if we were strict. 
+# For simplicity in this script structure where we parse at line 95:
+# We need to re-structure the arg parsing slightly to be clean.
+# Let's do it cleanly below.)
+
+# Re-doing arg parsing block for clarity since we are adding more args
+parser = argparse.ArgumentParser()
+parser.add_argument("--port", type=int, default=8765, help="WebSocket server port")
+parser.add_argument("--downloads", type=str, default=None, help="Directory to save downloads")
+args, unknown = parser.parse_known_args()
+
+PORT = args.port
+DOWNLOAD_DIR = args.downloads
+
+# Fallback loose port logic (same as before)
+if PORT == 8765 and unknown:
+    for arg in unknown:
+        try:
+            val = int(arg)
+            if 1024 < val < 65536:
+                PORT = val
+                break
+        except ValueError:
+            pass
+
+if not DOWNLOAD_DIR:
+    DOWNLOAD_DIR = os.environ.get("UPLINK_DOWNLOAD_DIR", os.getcwd())
+
+if not os.path.isabs(DOWNLOAD_DIR):
+    DOWNLOAD_DIR = os.path.abspath(DOWNLOAD_DIR)
+
+# Create dir if not exists
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+logging.info(f"Downloads directory set to: {DOWNLOAD_DIR}")
 
 async def start_ws():
     logging.info(f"Starting WebSocket server on port {PORT} (ws://127.0.0.1:{PORT})...")
@@ -280,21 +314,22 @@ async def screenshot(save_path: str = None) -> str:
             
             # Resolve path: 
             # 1. Use absolute path if provided.
-            # 2. If relative, use UPLINK_DOWNLOAD_DIR env var if set.
-            # 3. Fallback to CWD.
+            # 2. Else use DOWNLOAD_DIR
             
             if os.path.isabs(save_path):
                 full_path = save_path
             else:
-                base_dir = os.environ.get("UPLINK_DOWNLOAD_DIR", os.getcwd())
-                full_path = os.path.join(base_dir, save_path)
+                full_path = os.path.join(DOWNLOAD_DIR, save_path)
             
             # Create dir if needed
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             
             with open(full_path, "wb") as f:
                 f.write(data)
-            return f"Screenshot saved to {full_path}"
+                
+            # Return clickable URI
+            file_uri = pathlib.Path(full_path).as_uri()
+            return f"Screenshot saved: [{os.path.basename(full_path)}]({file_uri})"
         else:
             return "Error: Unexpected response format from browser screenshot."
     except Exception as e:
@@ -330,14 +365,12 @@ async def stop_recording(save_path: str = None) -> str:
             
             # Resolve path: 
             # 1. Use absolute path if provided.
-            # 2. If relative, use UPLINK_DOWNLOAD_DIR env var if set.
-            # 3. Fallback to CWD.
+            # 2. Else use DOWNLOAD_DIR
             
             if os.path.isabs(save_path):
                 full_path = save_path
             else:
-                base_dir = os.environ.get("UPLINK_DOWNLOAD_DIR", os.getcwd())
-                full_path = os.path.join(base_dir, save_path)
+                full_path = os.path.join(DOWNLOAD_DIR, save_path)
             
             # Ensure safe extension
             if not full_path.endswith(".webm"):
@@ -348,7 +381,10 @@ async def stop_recording(save_path: str = None) -> str:
             
             with open(full_path, "wb") as f:
                 f.write(data)
-            return f"Recording saved to {full_path}"
+                
+            # Return clickable URI
+            file_uri = pathlib.Path(full_path).as_uri()
+            return f"Recording saved: [{os.path.basename(full_path)}]({file_uri})"
         else:
             return "Error: Unexpected response format from browser recording."
     except Exception as e:

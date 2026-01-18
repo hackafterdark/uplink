@@ -7,9 +7,7 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
-  ],
-  "optional_permissions": [
+    "storage",
     "offscreen",
     "tabCapture"
   ],
@@ -18,9 +16,6 @@
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": [
-      "background.js"
-    ],
     "type": "module"
   },
   "content_scripts": [

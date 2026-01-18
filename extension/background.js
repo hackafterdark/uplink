@@ -101,6 +101,12 @@ function stopKeepAlive() {
 function connect() {
   if (manualDisconnect) return;
 
+  // Cleanup existing connection to prevent duplicates
+  if (socket) {
+    try { socket.close(); } catch (e) { }
+    socket = null;
+  }
+
   broadcastLog("SYSTEM", `Attempting WebSocket connection to port ${serverPort}...`);
   socket = new WebSocket(getSocketUrl());
 
@@ -589,6 +595,11 @@ async function createOffscreen() {
 
 async function startRecording(command) {
   try {
+    // Feature Detection for Firefox/Safari etc.
+    if (!api.offscreen) {
+      throw new Error("Video recording not supported in this browser (requires chrome.offscreen API). Please use Chrome or Edge.");
+    }
+
     await createOffscreen();
     const tabs = await api.tabs.query({ active: true, currentWindow: true });
     if (tabs.length === 0) throw new Error("No active tab to record");
