@@ -112,6 +112,38 @@ Click the extension icon to open the **Uplink Control** dashboard.
 *   **Activity Log**: See exactly what the AI is doing in real-time.
 *   **Panic Button**: Stop the AI immediately.
 *   **Security Settings**: Configure rate limits and blocklists.
+*   **Downloads**: Screenshots and recordings are saved to your working directory by default.
+
+## 👥 Multi-Agent & Advanced Config
+
+### Custom Port (Run Multiple Agents)
+You can run multiple instances of the server on different ports to power multiple agents simultaneously.
+
+```bash
+# Start server on port 8766
+python server.py --port 8766
+```
+
+Then in the **Extension Dashboard**, enter `8766` in the Port field to connect the specific browser window to that agent.
+
+### Custom Download Directory
+Keep your focused workspace clean by directing all media (screenshots, recordings) to a specific folder.
+
+```bash
+# Save files to ./media/
+python server.py --downloads "./media"
+```
+*Note: The tool returns clickable `file:///` links for easy access.*
+
+## 🎥 Video Recording
+*   **Supported Browsers**: Chrome, Edge, Brave (Chromium-based).
+*   **Unsupported**: Firefox, LibreWolf (Due to missing `offscreen` API).
+*   **Usage**: The `start_recording` tool captures the active tab's video and audio.
+
+## ✍️ Rich Text Support
+Uplink includes a smart typing tool that handles:
+*   **Standard Forms**: `<input>`, `<textarea>`.
+*   **Rich Text Editors**: `contenteditable` divs (e.g., **X.com**, **Notion**), simulating real keystrokes.
 
 ## 🌐 Multi-Browser Support
 
