@@ -1,6 +1,22 @@
 // Establish connection to background script updates
 const port = chrome.runtime.connect({ name: "dashboard" });
 
+port.onDisconnect.addListener(() => {
+  if (chrome.runtime.lastError) {
+    console.warn("Dashboard disconnected:", chrome.runtime.lastError.message);
+  } else {
+    console.warn("Dashboard disconnected");
+  }
+  statusEl.classList.remove('connected');
+  statusText.innerText = "Suspended";
+  addLog("SYSTEM", "Extension suspended. Reconnecting...");
+
+  // Try to reconnect after a short delay to wake up SW
+  setTimeout(() => {
+    window.location.reload();
+  }, 1000);
+});
+
 const statusEl = document.getElementById('connectionStatus');
 const statusText = document.getElementById('statusText');
 const panicToggle = document.getElementById('panicToggle');

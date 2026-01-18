@@ -74,6 +74,30 @@ function getSocketUrl() {
 // remove const socketUrl = ... we use getSocketUrl() now
 let manualDisconnect = false;
 
+// Keep-Alive Mechanism
+function startKeepAlive() {
+  if (keepAliveInterval) clearInterval(keepAliveInterval);
+  keepAliveInterval = setInterval(() => {
+    // 1. Local API call to reset idle timer
+    api.runtime.getPlatformInfo(() => {
+      // no-op
+    });
+
+    // 2. Log to console (active devtools keeps it alive)
+    console.log("Keep-Alive Heartbeat");
+
+    // 3. Update dashboard if connected
+    if (dashboardPorts.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
+      // Optional: We could broadcast a heartbeat here if needed
+    }
+  }, 20000); // 20s
+}
+
+function stopKeepAlive() {
+  if (keepAliveInterval) clearInterval(keepAliveInterval);
+  keepAliveInterval = null;
+}
+
 function connect() {
   if (manualDisconnect) return;
 
@@ -84,6 +108,7 @@ function connect() {
     console.log('Connected to MCP Server');
     broadcastLog("SYSTEM", "WebSocket connection OPEN");
     broadcastState();
+    startKeepAlive();
   };
 
   socket.onmessage = async (event) => {
@@ -94,6 +119,7 @@ function connect() {
   socket.onclose = () => {
     console.log('Disconnected.');
     socket = null;
+    stopKeepAlive();
     broadcastState();
 
     if (!manualDisconnect) {
