@@ -27,32 +27,27 @@ api.storage.local.get(['allowLocalFiles', 'userBlocklist', 'panicMode', 'rateLim
 
 // Helper: Glob to Regex
 function globToRegex(pattern) {
-  // Escape regex characters except *
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  // Convert * to .*
   const finalParams = escaped.replace(/\*/g, '.*');
-  return new RegExp(`^${finalParams}$`, 'i'); // Case insensitive, full match
+  return new RegExp(`^${finalParams}$`, 'i');
 }
 
 function checkUrlAllowed(url) {
-  if (!url) return true; // Non-navigation commands don't have URLs usually
+  if (!url) return true;
   try {
     const urlObj = new URL(url);
     const protocol = urlObj.protocol;
 
-    // 1. Check Hardcoded Protocols
     if (RESTRICTED_PROTOCOLS.some(p => protocol.startsWith(p))) {
       return { allowed: false, reason: "Restricted System Protocol" };
     }
 
-    // 2. Check Local Files
     if (protocol === 'file:' && !allowLocalFiles) {
       return { allowed: false, reason: "Local File Access Disabled" };
     }
 
-    // 3. Check User Blocklist (Glob Patterns)
     const domain = urlObj.hostname;
-    const fullUrl = url; // Match against full URL for path blocking
+    const fullUrl = url;
 
     for (const pattern of userBlocklist) {
       const regex = globToRegex(pattern);
@@ -63,88 +58,89 @@ function checkUrlAllowed(url) {
 
     return { allowed: true };
   } catch (e) {
-    // Invalid URL? If it's not a URL (e.g. "about:blank"), we might catch it above or here.
-    // "about:blank" parses as protocol "about:" in some environments or fails.
     if (url.startsWith('about:')) return { allowed: false, reason: "Restricted System Protocol" };
-    return { allowed: true }; // Allow if we can't parse (e.g. data uri? maybe block specific ones?)
+    return { allowed: true };
   }
 }
 const socketUrl = 'ws://127.0.0.1:8765?token=mcp-browser-bridge-secret';
+let manualDisconnect = false;
+
 function connect() {
+  if (manualDisconnect) return;
+
+  broadcastLog("SYSTEM", "Attempting WebSocket connection...");
   socket = new WebSocket(socketUrl);
 
   socket.onopen = () => {
     console.log('Connected to MCP Server');
-    broadcastState(); // Notify dashboard
+    broadcastLog("SYSTEM", "WebSocket connection OPEN");
+    broadcastState();
   };
 
   socket.onmessage = async (event) => {
     const command = JSON.parse(event.data);
-
-    // --- 🛑 SECURITY CHECK: PANIC MODE ---
-    if (panicMode) {
-      console.warn("Command blocked by PANIC MODE:", command);
-      // We still log it to dashboard so user sees what WAS blocked
-      broadcastLog("BLOCKED", `Action: ${command.action} (Panic Mode Active)`);
-      socket.send(JSON.stringify({ error: "Command blocked: Panic Mode is ENABLED locally." }));
-      return;
-    }
-
-    // Only log incoming commands, prevent spam
-
-    // Create detailed log message
-    let logDetails = "";
-    if (command.url) logDetails += ` → ${command.url}`;
-    if (command.selector) logDetails += ` [${command.selector}]`;
-
-    // SECURE LOGGING: Check if typing into a password field
-    let safeText = command.text;
-    if (command.action === "type_text" || command.action === "type") {
-      let isPwd = false;
-
-      // 1. Try DOM Inspection
-      try {
-        isPwd = await checkIsPasswordField(command.selector);
-      } catch (e) {
-        console.warn("Password check error:", e);
-      }
-
-      // 2. Fallback Heuristic (if DOM check didn't catch it)
-      if (!isPwd && command.selector && command.selector.toLowerCase().includes('password')) {
-        isPwd = true; // Selector implies password
-      }
-
-      if (isPwd) {
-        safeText = "******** (Redacted)";
-      }
-    }
-
-    if (command.text) logDetails += ` "${safeText}"`;
-    if (command.key) logDetails += ` (key=${command.key})`;
-
-    broadcastLog(command.action.toUpperCase(), logDetails); // Log to dashboard
-
-    try {
-      await handleCommand(command);
-    } catch (err) {
-      console.error("Command Execution Error:", err);
-      broadcastLog("ERROR", err.message);
-      socket.send(JSON.stringify({ error: "Internal Extension Error: " + err.message }));
-    }
+    await handleIncomingMessage(command);
   };
 
   socket.onclose = () => {
-    console.log('Disconnected. Reconnecting in 5s...');
-    broadcastState(); // Notify dashboard
-    setTimeout(connect, 5000);
+    console.log('Disconnected.');
+    socket = null;
+    broadcastState();
+
+    if (!manualDisconnect) {
+      console.log('Reconnecting in 5s...');
+      setTimeout(connect, 5000);
+    }
   };
 
   socket.onerror = (error) => {
     console.error('WebSocket Error:', error);
+    broadcastLog("ERROR", "WebSocket connection failure");
   };
 }
 
-// Helper to check for password field safely
+async function handleIncomingMessage(command) {
+  if (panicMode) {
+    console.warn("Command blocked by PANIC MODE:", command);
+    broadcastLog("BLOCKED", `Action: ${command.action} (Panic Mode Active)`);
+    if (socket) socket.send(JSON.stringify({ error: "Command blocked: Panic Mode is ENABLED locally." }));
+    return;
+  }
+
+  let logDetails = "";
+  if (command.url) logDetails += ` → ${command.url}`;
+  if (command.selector) logDetails += ` [${command.selector}]`;
+
+  let safeText = command.text;
+  if (command.action === "type_text" || command.action === "type") {
+    let isPwd = false;
+    try {
+      isPwd = await checkIsPasswordField(command.selector);
+    } catch (e) {
+      console.warn("Password check error:", e);
+    }
+    if (!isPwd && command.selector && command.selector.toLowerCase().includes('password')) {
+      isPwd = true;
+    }
+    if (isPwd) {
+      safeText = "******** (Redacted)";
+    }
+  }
+
+  if (command.text) logDetails += ` "${safeText}"`;
+  if (command.key) logDetails += ` (key=${command.key})`;
+
+  broadcastLog(command.action.toUpperCase(), logDetails);
+
+  try {
+    await handleCommand(command);
+  } catch (err) {
+    console.error("Command Execution Error:", err);
+    broadcastLog("ERROR", err.message);
+    if (socket) socket.send(JSON.stringify({ error: "Internal Extension Error: " + err.message }));
+  }
+}
+
 async function checkIsPasswordField(selector) {
   if (!selector) return false;
   try {
@@ -159,14 +155,12 @@ async function checkIsPasswordField(selector) {
       },
       args: [selector]
     });
-    // If ANY frame says it's a password field, then it is.
     return results.some(r => r.result === true);
   } catch (e) {
     return false;
   }
 }
 
-// --- Dashboard Communication ---
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "dashboard") {
     dashboardPorts.add(port);
@@ -178,7 +172,7 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener((msg) => {
       try {
         if (msg.type === "GET_STATE") {
-          broadcastState(); // Just broadcast to all, simpler
+          broadcastState();
         }
         if (msg.type === "SET_PANIC") {
           panicMode = msg.value;
@@ -197,9 +191,7 @@ chrome.runtime.onConnect.addListener((port) => {
           broadcastState();
         }
         if (msg.type === "ADD_BLOCKLIST_ITEM") {
-          // Ensure array
           if (!Array.isArray(userBlocklist)) userBlocklist = [];
-
           if (!userBlocklist.includes(msg.value)) {
             userBlocklist.push(msg.value);
             api.storage.local.set({ userBlocklist: userBlocklist });
@@ -214,6 +206,25 @@ chrome.runtime.onConnect.addListener((port) => {
           broadcastLog("SYSTEM", `Blocked removed: ${msg.value}`);
           broadcastState();
         }
+        if (msg.type === "TOGGLE_CONNECTION") {
+          if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+            // Disconnect
+            manualDisconnect = true;
+            socket.close();
+            logHistory.unshift({ action: "SYSTEM", details: "Disconnected by user request", time: new Date().toISOString() });
+            broadcastState();
+          } else {
+            // Connect
+            manualDisconnect = false;
+            if (socket) {
+              try { socket.close(); } catch (e) { }
+              socket = null;
+            }
+            connect();
+            logHistory.unshift({ action: "SYSTEM", details: "Connecting by user request...", time: new Date().toISOString() });
+            broadcastState();
+          }
+        }
       } catch (err) {
         console.error("Dashboard Msg Error:", err);
         broadcastLog("ERROR", "Dashboard handler: " + err.message);
@@ -226,14 +237,13 @@ function broadcastState() {
   const state = {
     connected: socket && socket.readyState === WebSocket.OPEN,
     panicMode: panicMode,
-    panicMode: panicMode,
     allowLocalFiles: allowLocalFiles,
     userBlocklist: userBlocklist,
     rateLimitMs: rateLimitMs,
     logs: logHistory
   };
   for (const port of dashboardPorts) {
-    port.postMessage({ type: "STATE_UPDATE", state: state });
+    try { port.postMessage({ type: "STATE_UPDATE", state: state }); } catch (e) { }
   }
 }
 
@@ -244,29 +254,21 @@ function broadcastLog(action, details) {
     time: new Date().toISOString()
   };
 
-  // Update History
   logHistory.unshift(entry);
   if (logHistory.length > 500) logHistory.pop();
 
   for (const port of dashboardPorts) {
-    port.postMessage({ type: "LOG_ENTRY", ...entry });
+    try { port.postMessage({ type: "LOG_ENTRY", ...entry }); } catch (e) { }
   }
 }
 
-// --- Command Handler ---
 async function handleCommand(command) {
-  // 1. Rate Limiting
   const now = Date.now();
   if (now - lastCommandTime < rateLimitMs) {
-    // Too fast!
-    // Optional: We could just delay execution code here using await new Promise...
-    // But purely dropping or erroring might be safer for "Bot" detection.
-    // Let's delay it to be nice.
     await new Promise(r => setTimeout(r, rateLimitMs - (now - lastCommandTime)));
   }
   lastCommandTime = Date.now();
 
-  // 2. Input Length Validation
   if (command.action === 'type_text' || command.action === 'type') {
     if (command.text && command.text.length > MAX_TYPE_LENGTH) {
       throw new Error(`Input text exceeds limit (${MAX_TYPE_LENGTH} chars)`);
@@ -278,7 +280,6 @@ async function handleCommand(command) {
     }
   }
 
-  // 3. URL Validation (Navigate / Open Tab)
   if (command.action === 'navigate' || command.action === 'open_tab') {
     const check = checkUrlAllowed(command.url);
     if (!check.allowed) {
@@ -286,8 +287,6 @@ async function handleCommand(command) {
     }
   }
 
-
-  // Commands that don't need a tab content script
   if (command.action === "start_recording") {
     await startRecording(command);
     return;
@@ -297,12 +296,10 @@ async function handleCommand(command) {
     return;
   }
 
-  // Open Tab (handled here so it works even if no tab is currently active)
   if (command.action === "open_tab") {
     try {
       const tab = await api.tabs.create({ url: command.url, active: true });
 
-      // Wait for page load
       await new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           api.tabs.onUpdated.removeListener(listener);
@@ -326,7 +323,6 @@ async function handleCommand(command) {
     return;
   }
 
-  // Find active tab
   const tabs = await api.tabs.query({ active: true, currentWindow: true });
   if (tabs.length === 0) {
     socket.send(JSON.stringify({ error: "No active tab" }));
@@ -334,13 +330,9 @@ async function handleCommand(command) {
   }
   const tabId = tabs[0].id;
 
-  // Screenshot is special in background for full capture if desired, 
-  // but let's stick to content script or captureVisibleTab here.
   if (command.action === "screenshot") {
     try {
       const dataUrl = await api.tabs.captureVisibleTab(null, { format: "png" });
-      // Remove data:image/png;base64, prefix if you want raw, but usually keep it or just confirm.
-      // Server expects base64.
       socket.send(JSON.stringify(dataUrl));
     } catch (err) {
       socket.send(JSON.stringify({ error: err.message }));
@@ -351,8 +343,6 @@ async function handleCommand(command) {
   if (command.action === "navigate") {
     try {
       await api.tabs.update(tabId, { url: command.url });
-
-      // Wait for page load
       await new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           api.tabs.onUpdated.removeListener(listener);
@@ -383,7 +373,6 @@ async function handleCommand(command) {
         world: 'MAIN',
         func: (code) => {
           try {
-            // Attempt to evaluate. Note: Strict Page CSP may still block 'eval'.
             return window.eval(code);
           } catch (e) {
             return "Error: " + e.message;
@@ -398,15 +387,8 @@ async function handleCommand(command) {
     return;
   }
 
-  // Inject Console Hook (Lazy load or ensure it's there)
-  // We'll try to inject it every time we get a log request or navigation, 
-  // but let's do it on 'get_logs' to be safe, or maybe just rely on 'content.js' 
-  // BUT the user wants it to work where content.js failed.
-  // Let's force inject it if requested.
-
   if (command.action === "get_logs") {
     try {
-      // First, ensure hook is there (idempotent-ish)
       await api.scripting.executeScript({
         target: { tabId: tabId },
         world: 'MAIN',
@@ -433,15 +415,12 @@ async function handleCommand(command) {
         }
       });
 
-      // Then retrieve
       const results = await api.scripting.executeScript({
         target: { tabId: tabId },
         world: 'MAIN',
         func: () => window.__mcp_logs || []
       });
 
-      // Clear logs after reading? Maybe not, just return them.
-      // Or we can clear them to mimic the stream.
       await api.scripting.executeScript({
         target: { tabId: tabId },
         world: 'MAIN',
@@ -455,15 +434,12 @@ async function handleCommand(command) {
     return;
   }
 
-  // --- Frame-Agnostic Handler for DOM Actions ---
-  // 1. READ: Aggregate text from ALL frames
   if (command.action === "read") {
     try {
       const results = await api.scripting.executeScript({
         target: { tabId: tabId, allFrames: true },
         func: () => document.body.innerText
       });
-      // Combine all frames' text, filtering empty ones
       const fullText = results.map(r => r.result).filter(t => t && t.trim().length > 0).join("\n\n--- Frame ---\n\n");
       socket.send(JSON.stringify(fullText || "Page is empty"));
     } catch (err) {
@@ -472,17 +448,8 @@ async function handleCommand(command) {
     return;
   }
 
-  // 2. ELEMENT ACTIONS: Find which frame has the element, then target it.
   if (["click", "type", "highlight", "get_html", "wait_for"].includes(command.action)) {
     try {
-      // Special case: wait_for doesn't need to find it *now*, it needs to wait.
-      // We can broadcast wait_for to all frames, and whoever finds it first wins?
-      // But broadcast via sendMessage resolves to the first response (usually Top Frame).
-      // So for wait_for, we should probably let all frames run the check and race.
-      // BUT standard sendMessage behavior is: callback invoked only once.
-
-      // Strategy for Interactions (click/type/highlight/get_html):
-      // Find the frame ID first.
       let targetFrameId = 0;
 
       if (command.selector) {
@@ -495,26 +462,11 @@ async function handleCommand(command) {
         if (match) {
           targetFrameId = match.frameId;
         } else if (command.action !== 'wait_for') {
-          // If not waiting, and not found => Error
           socket.send(JSON.stringify({ error: `Element not found: ${command.selector}` }));
           return;
         }
       }
 
-      // Send to specific frame (or 0 if not found/wait_for default)
-      // For wait_for, we actually want to send to ALL frames and ignore failures?
-      // No, simplest V1 IFrame fix: Just target the frame we found. 
-      // If wait_for, we might need to poll via scripting. 
-      // Let's stick to simple "Try found frame" for now.
-
-      // Wait: wait_for needs to poll. The content script handles polling.
-      // If we send to frame 0, and element is in frame 99, frame 0 waits and fails.
-      // We need 'wait_for' to search all frames repeatedly.
-      // Let's implement 'wait_for' using scripting here in background to save complexity?
-      // Actually, let's keep it simple: If action is wait_for, we send to ALL frames?
-      // Issue: Promise resolves on first response.
-
-      // BETTER WAIT_FOR:
       if (command.action === 'wait_for') {
         const timeout = command.timeout || 15000;
         const start = Date.now();
@@ -537,7 +489,6 @@ async function handleCommand(command) {
         return;
       }
 
-      // For Click/Type/GetHTML: We definitely found the frame above.
       const response = await api.tabs.sendMessage(tabId, command, { frameId: targetFrameId });
       socket.send(JSON.stringify(response || "Done"));
 
@@ -547,11 +498,10 @@ async function handleCommand(command) {
     return;
   }
 
-  // 3. STORAGE: Read from Main World (Top Frame usually)
   if (command.action === "get_storage") {
     try {
       const results = await api.scripting.executeScript({
-        target: { tabId: tabId }, // Default to top frame for storage
+        target: { tabId: tabId },
         world: 'MAIN',
         func: (type, key) => {
           try {
@@ -568,20 +518,13 @@ async function handleCommand(command) {
     return;
   }
 
-  // Fallback for other commands
   try {
     const response = await api.tabs.sendMessage(tabId, command);
-    // If response is undefined, it might be that the listener didn't return anything
-    // or the connection was closed.
     socket.send(JSON.stringify(response || "Done"));
   } catch (err) {
-    // If content script isn't loaded (e.g. new tab or restricted page), try injecting?
-    // For V1, just report error.
     socket.send(JSON.stringify({ error: "Content script error: " + err.message }));
   }
 }
-
-// --- Recording Logic (Offscreen) ---
 
 async function createOffscreen() {
   if (await api.offscreen.hasDocument()) return;
@@ -595,14 +538,11 @@ async function createOffscreen() {
 async function startRecording(command) {
   try {
     await createOffscreen();
-    // Get the active tab ID to record
     const tabs = await api.tabs.query({ active: true, currentWindow: true });
     if (tabs.length === 0) throw new Error("No active tab to record");
 
-    // Get a stream ID (Chrome specific, for Firefox might need different path)
     const streamId = await api.tabCapture.getMediaStreamId({ targetTabId: tabs[0].id });
 
-    // Send to offscreen
     api.runtime.sendMessage({
       type: 'START_RECORDING',
       target: 'offscreen',
@@ -622,21 +562,16 @@ async function stopRecording(command) {
     return;
   }
 
-  // Ask offscreen to stop
   api.runtime.sendMessage({
     type: 'STOP_RECORDING',
     target: 'offscreen'
   });
-  // We wait for the offscreen to send the blob back via message, 
-  // BUT we need to bridge it to the socket.
 
-  // We'll set a one-time listener for the data
   const dataHandler = (message) => {
     if (message.type === 'RECORDING_DATA') {
-      socket.send(message.data); // The big base64 string
+      socket.send(message.data);
       recordingState = false;
       api.runtime.onMessage.removeListener(dataHandler);
-      // Close offscreen to save resources?
       api.offscreen.closeDocument();
     }
   };

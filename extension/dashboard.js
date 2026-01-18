@@ -177,12 +177,16 @@ rateLimitInput.addEventListener('change', (e) => {
   port.postMessage({ type: "SET_RATE_LIMIT", value: val });
 });
 
+// Connection Toggle (Clicking the Status Badge)
+statusEl.addEventListener('click', () => {
+  port.postMessage({ type: "TOGGLE_CONNECTION" });
+});
+
 // Download Logs
 document.getElementById('downloadBtn').addEventListener('click', () => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `uplink-logs-${timestamp}.json`;
 
-  // Request fresh state to download
   port.postMessage({ type: "GET_STATE" });
 
   const downloadListener = (msg) => {
@@ -196,10 +200,26 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
-      port.onMessage.removeListener(downloadListener); // Clean up
+      port.onMessage.removeListener(downloadListener);
     }
   };
-
   port.onMessage.addListener(downloadListener);
+});
+
+// Update button visuals based on state
+function updateConnectionButton(connected) {
+  if (connected) {
+    connectToggleBtn.innerText = "❌"; // Disconnect
+    connectToggleBtn.title = "Disconnect from Server";
+  } else {
+    connectToggleBtn.innerText = "🔌"; // Connect
+    connectToggleBtn.title = "Connect to Server";
+  }
+}
+
+// Hook into state updates
+port.onMessage.addListener((msg) => {
+  if (msg.type === "STATE_UPDATE") {
+    // Status update handled above in existing code
+  }
 });

@@ -3,7 +3,9 @@ import asyncio
 import websockets
 import json
 import base64
+import base64
 import os
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -62,6 +64,15 @@ async def handler(websocket):
 
     logging.info(f"New connection from {websocket.remote_address}")
     async with socket_lock:
+        if browser_socket is not None and browser_socket.open:
+            logging.info("Closing existing connection to accept new one...")
+            try:
+                # Add timeout to prevent hanging if the client is unresponsive
+                await asyncio.wait_for(browser_socket.close(1001, "New connection takeover"), timeout=2.0)
+            except asyncio.TimeoutError:
+                logging.warning("Timed out waiting for old connection to close cleanly")
+            except Exception as e:
+                logging.error(f"Error closing old connection: {e}")
         browser_socket = websocket
     logging.info("🌍 Browser Connected!")
     try:
@@ -227,10 +238,47 @@ async def get_session_storage(key: str) -> str:
     })
 
 @mcp.tool()
-async def screenshot() -> str:
-    """Takes a screenshot of the visible area of the active tab. 
-    Returns a base64 encoded image string."""
-    return await send_command({"action": "screenshot"})
+async def screenshot(save_path: str = None) -> str:
+    """Takes a screenshot. 
+    save_path: File path. If None, generates a timestamped filename (e.g., 'screenshot_20240101_120000.png')."""
+    
+    # Generate timestamped default if no path provided
+    if not save_path:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = f"screenshot_{timestamp}.png"
+        
+    response = await send_command({"action": "screenshot"})
+    
+    if response.startswith("Error"):
+        return response
+        
+    try:
+        # Expected format: "data:image/png;base64,..."
+        if "base64," in response:
+            header, encoded = response.split("base64,", 1)
+            data = base64.b64decode(encoded)
+            
+            # Resolve path: 
+            # 1. Use absolute path if provided.
+            # 2. If relative, use UPLINK_DOWNLOAD_DIR env var if set.
+            # 3. Fallback to CWD.
+            
+            if os.path.isabs(save_path):
+                full_path = save_path
+            else:
+                base_dir = os.environ.get("UPLINK_DOWNLOAD_DIR", os.getcwd())
+                full_path = os.path.join(base_dir, save_path)
+            
+            # Create dir if needed
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
+            with open(full_path, "wb") as f:
+                f.write(data)
+            return f"Screenshot saved to {full_path}"
+        else:
+            return "Error: Unexpected response format from browser screenshot."
+    except Exception as e:
+        return f"Error saving screenshot: {str(e)}"
 
 @mcp.tool()
 async def start_recording() -> str:
@@ -238,8 +286,15 @@ async def start_recording() -> str:
     return await send_command({"action": "start_recording"})
 
 @mcp.tool()
-async def stop_recording(save_path: str = "recording.webm") -> str:
-    """Stops the video recording and saves it to the specified path on the server."""
+async def stop_recording(save_path: str = None) -> str:
+    """Stops the video recording and saves it.
+    save_path: File path. If None, generates a timestamped filename."""
+    
+    # Generate timestamped default if no path provided
+    if not save_path:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = f"recording_{timestamp}.webm"
+        
     # This expects the browser to send back the binary data or a large data URL
     # For a robust implementation, we might need chunking, but for V1:
     response = await send_command({"action": "stop_recording"})
@@ -253,12 +308,24 @@ async def stop_recording(save_path: str = "recording.webm") -> str:
             header, encoded = response.split("base64,", 1)
             data = base64.b64decode(encoded)
             
-            # Ensure path is safe (simple check)
-            filename = os.path.basename(save_path)
-            if not filename.endswith(".webm"):
-                filename += ".webm"
+            # Resolve path: 
+            # 1. Use absolute path if provided.
+            # 2. If relative, use UPLINK_DOWNLOAD_DIR env var if set.
+            # 3. Fallback to CWD.
             
-            full_path = os.path.abspath(filename)
+            if os.path.isabs(save_path):
+                full_path = save_path
+            else:
+                base_dir = os.environ.get("UPLINK_DOWNLOAD_DIR", os.getcwd())
+                full_path = os.path.join(base_dir, save_path)
+            
+            # Ensure safe extension
+            if not full_path.endswith(".webm"):
+                full_path += ".webm"
+                
+            # Create dir if needed
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
             with open(full_path, "wb") as f:
                 f.write(data)
             return f"Recording saved to {full_path}"
