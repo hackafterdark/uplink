@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Uplink Control</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #3b82f6;
+      --bg-danger: #ef4444;
+      --bg-success: #22c55e;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      width: 350px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0;
+      letter-spacing: -0.025em;
+    }
+
+    .status-badge {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #334155;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    
+    .status-badge.connected {
+      background: rgba(34, 197, 94, 0.2);
+      color: #4ade80;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      border: 1px solid #334155;
+    }
+
+    .control-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .label-danger {
+      color: #f87171;
+      font-weight: 600;
+    }
+
+    /* Toggle Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    
+    .switch input { opacity: 0; width: 0; height: 0; }
+    
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #334155;
+      transition: .3s;
+      border-radius: 24px;
+    }
+    
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    
+    input:checked + .slider {
+      background-color: var(--bg-danger);
+    }
+    
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+
+    .logs-container {
+      height: 200px;
+      overflow-y: auto;
+      background: #020617;
+      border-radius: 8px;
+      padding: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      border: 1px solid #334155;
+    }
+
+    .log-entry {
+      margin-bottom: 6px;
+      color: var(--text-muted);
+      border-bottom: 1px solid #1e293b;
+      padding-bottom: 4px;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    
+    .log-time { color: #64748b; margin-right: 6px; }
+    .log-action { color: var(--accent); font-weight: bold; }
+
+    footer {
+      font-size: 10px;
+      color: #475569;
+      text-align: center;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Uplink</h1>
+    <div style="display: flex; gap: 8px;">
+        <button id="downloadBtn" style="background:none; border:none; cursor:pointer; font-size:14px;" title="Download Logs">⬇️</button>
+        <div id="connectionStatus" class="status-badge">
+            <div class="status-dot"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="control-row">
+      <div>
+        <div class="label-danger">PANIC MODE 🛑</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Block all incoming commands</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="panicToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">Activity Log</div>
+    <main class="logs-container" id="logs">
+      <div class="log-entry"><span class="log-time">--:--:--</span> Waiting for activity...</div>
+      <!-- Logs will appear here -->
+    </main>
+  </div>
+
+  <section id="security-panel" class="card">
+      <h3 style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">Security Settings</h3>
+      
+      <!-- Local File Toggle -->
+      <div class="control-row" style="margin-bottom: 10px;">
+          <label for="localFileToggle" style="font-size: 14px;">Allow Local Files (file://)</label>
+          <label class="switch">
+            <input type="checkbox" id="localFileToggle">
+            <span class="slider"></span>
+          </label>
+      </div>
+
+      <!-- Blocklist UI -->
+      <div>
+          <label style="font-size: 12px; display:block; margin-bottom: 4px; color: var(--text-muted);">
+            Blocked Domains (<span id="blocklistCount">0</span>)
+          </label>
+          <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+              <input type="text" id="blocklistInput" placeholder="e.g. *.bank.com" style="flex:1; padding: 6px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: var(--text-main); font-size: 13px;">
+              <button id="addBlockBtn" style="padding: 6px 12px; cursor: pointer; background: var(--accent); color: white; border: none; border-radius: 6px; font-size: 13px;">Add</button>
+          </div>
+          <ul id="blocklist" style="list-style: none; padding: 5px; margin: 0; min-height: 60px; max-height: 100px; overflow-y: auto; background: #020617; border-radius: 8px; border: 1px solid #334155;">
+              <!-- Blocklist items go here -->
+          </ul>
+      </div>
+      
+      <!-- Rate Limit UI -->
+      <div class="control-row" style="margin-top: 10px;">
+          <label for="rateLimitInput" style="font-size: 13px;">Rate Limit (ms)</label>
+          <input type="number" id="rateLimitInput" min="0" max="5000" step="100" style="padding: 4px; width: 60px; border-radius: 4px; border: 1px solid #444; background: #222; color: #fff;">
+      </div>
+  </section>
+
+  <footer>
+    Uplink v1.0 • Secure Token Active 🔒
+  </footer>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

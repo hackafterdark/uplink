@@ -1,0 +1,42 @@
+*.log
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Project Debug/Test Files
+server.log
+test.html
+debug_client*.html
+verify.py
+browser-bridge-logs-*.json
+uplink-logs-*.json
+.vscode/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
