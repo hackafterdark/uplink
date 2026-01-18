@@ -156,10 +156,16 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       createOverlay(rect, label);
 
-      el.value = request.text;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      respond("Typed");
+      if (el.isContentEditable) {
+        el.focus();
+        document.execCommand('insertText', false, request.text);
+        respond("Typed (ContentEditable)");
+      } else {
+        el.value = request.text;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        respond("Typed");
+      }
     }
     else if (request.action === 'get_html') {
       respond(el.outerHTML);
