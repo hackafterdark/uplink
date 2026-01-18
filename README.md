@@ -1,6 +1,6 @@
 # Uplink: The AI Browser Bridge 🛰️
 
-**Uplink** (formerly Browser Bridge) is a powerful tool that connects your local AI agents to your web browser. It acts as a bridge, allowing AI models (via the Model Context Protocol - MCP) to read, control, and interact with the open web just like a human user.
+**Uplink** is a powerful tool that connects your local AI agents to your web browser. It acts as a bridge, allowing AI models (via the Model Context Protocol - MCP) to read, control, and interact with the open web just like a human user.
 
 ## 🚀 What is Uplink?
 
