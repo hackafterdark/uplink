@@ -17,18 +17,18 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
-| `click_element` | Clicks an element defined by a CSS selector. (Highlights before clicking) | `selector` (str), `purpose` (str, optional) |
-| `type_text` | Types text into an element defined by a CSS selector. | `selector` (str), `text` (str) |
-| `hover_element` | Hovers over an element defined by a CSS selector. | `selector` (str) |
-| `select_option` | Selects an option in a `<select>` element by its value. | `selector` (str), `value` (str) |
-| `wait_for_element` | Waits for an element to appear in the DOM. Essential for React/SPA apps. | `selector` (str), `timeout` (int, default 15000) |
+| `click_element` | Clicks an element. Supports Numeric IDs (e.g., "1") from `read_page` or CSS selectors. | `selector` (str), `purpose` (str, optional) |
+| `type_text` | Types text into an element. Supports Numeric IDs or CSS selectors. | `selector` (str), `text` (str) |
+| `hover_element` | Hovers over an element. Supports Numeric IDs or CSS selectors. | `selector` (str) |
+| `select_option` | Selects an option in a `<select>` element. Supports Numeric IDs or CSS selectors. | `selector` (str), `value` (str) |
+| `wait_for_element` | Waits for an element to appear (Numeric ID or CSS selector). Essential for React/SPA apps. | `selector` (str), `timeout` (int, default 15000) |
 | `execute_script` | Executes arbitrary JavaScript in the active tab context. Returns the result. | `script` (str) |
 
 ## Data Extraction
 
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
-| `read_page` | Returns the text content of the active tab. | None |
+| `read_page` | Returns the page content. Default format is 'distilled' (ID-mapped). | `format` (str, optional: 'distilled' (default), 'text', 'html') |
 | `read_as_markdown` | Converts the active page's HTML content to Markdown. Optimized for LLMs. | None |
 | `get_html` | Returns the outerHTML of an element. Useful for inspecting attributes. | `selector` (str) |
 | `get_page_metadata` | Returns metadata for the active page (title, description, image, etc). | None |

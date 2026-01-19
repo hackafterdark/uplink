@@ -127,23 +127,39 @@ logging.info(f"Downloads directory set to: {DOWNLOAD_DIR}")
 async def start_ws():
     logging.info(f"Starting WebSocket server on port {PORT} (ws://127.0.0.1:{PORT})...")
     print(f"DEBUG: Attempting to start WebSocket server on port {PORT}...")
-    try:
-        # Aggressive keep-alive (5s ping) to keep Service Worker alive
-        async with websockets.serve(handler, "127.0.0.1", PORT, ping_interval=5, ping_timeout=10):
-            print(f"DEBUG: WebSocket server running on ws://127.0.0.1:{PORT}")
-            logging.info("WebSocket server started successfully")
-            await asyncio.Future()  # Run forever
-    except OSError as e:
-        if e.errno == 10048: # Address already in use (Windows) or 98 (Linux)
-            msg = f"ERROR: Port {PORT} is already in use! Please close other server instances or specify a different port."
-            print(msg)
-            logging.error(msg)
-        else:
-            print(f"ERROR: Failed to start WebSocket server: {e}")
-            logging.error(f"Failed to start WebSocket server: {e}")
-    except Exception as e:
-        print(f"CRITICAL ERROR: {e}")
-        logging.error(f"CRITICAL ERROR: {e}")
+    
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            # Aggressive keep-alive (5s ping) to keep Service Worker alive
+            # websockets.serve sets reuse_address=True by default on most platforms
+            async with websockets.serve(handler, "127.0.0.1", PORT, ping_interval=5, ping_timeout=10):
+                print(f"DEBUG: WebSocket server running on ws://127.0.0.1:{PORT}")
+                logging.info("WebSocket server started successfully")
+                await asyncio.Future()  # Run forever
+            return # Should not be reached unless cancelled
+            
+        except OSError as e:
+            if e.errno == 10048 or e.errno == 98: # Address already in use
+                if attempt < max_retries - 1:
+                    msg = f"Port {PORT} is busy (attempt {attempt+1}/{max_retries}). Retrying in 1s..."
+                    print(msg)
+                    logging.warning(msg)
+                    await asyncio.sleep(1)
+                    continue
+                else:
+                    msg = f"ERROR: Port {PORT} is still in use after {max_retries} attempts. giving up."
+                    print(msg)
+                    logging.error(msg)
+                    raise
+            else:
+                print(f"ERROR: Failed to start WebSocket server: {e}")
+                logging.error(f"Failed to start WebSocket server: {e}")
+                raise
+        except Exception as e:
+            print(f"CRITICAL ERROR: {e}")
+            logging.error(f"CRITICAL ERROR: {e}")
+            raise
 
 # --- MCP Lifecycle ---
 @asynccontextmanager
@@ -189,14 +205,25 @@ async def send_command(command: dict) -> str:
 # --- Tools ---
 
 @mcp.tool()
-async def read_page() -> str:
-    """Returns the text content of the active tab."""
-    return await send_command({"action": "read"})
+async def read_page(format: str = "distilled") -> str:
+    """
+    Returns the page content.
+    ARGUMENTS:
+        format: 'distilled' (default), 'text', or 'html'.
+        - 'distilled': A simplified map of interactive elements [ID] <tag> "Label".
+                       Use this to get numeric IDs for interaction.
+        - 'text': Raw text content of the page.
+        - 'html': The outerHTML of the document.
+    """
+    return await send_command({"action": "read", "format": format})
 
 @mcp.tool()
 async def click_element(selector: str, purpose: str = "") -> str:
-    """Clicks an element defined by a CSS selector. 
-    'purpose' is an optional label to show on the highlight overlay."""
+    """Clicks an element.
+    ARGUMENTS:
+        selector: The numeric ID from read_page (e.g., "42") OR a CSS selector.
+                  ALWAYS prefer using the numeric ID if available from the 'distilled' view.
+        purpose: Optional label to show on the highlight overlay."""
     # 1. Highlight
     await send_command({
         "action": "highlight",

@@ -53,6 +53,121 @@ function createOverlay(rect, labelText) {
   setTimeout(() => overlay.remove(), 2500);
 }
 
+// --- Global State for Uplink ---
+window.uplink = {
+  map: new Map(), // Stores ID -> Element Reference
+  idCounter: 0
+};
+
+// --- Semantic DOM Parser ---
+/**
+ * Scans the page for interactive elements and text.
+ * Returns a simplified text representation for the AI.
+ */
+function getPageSnapshot() {
+  // Reset state
+  window.uplink.map.clear();
+  window.uplink.idCounter = 0;
+
+  let output = [];
+
+  // Helper: Is the element actually visible to the user?
+  function isVisible(el) {
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      style.opacity !== '0' &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  // Helper: Get a meaningful label for the element
+  function getLabel(el) {
+    return (
+      el.getAttribute('aria-label') ||
+      el.innerText ||
+      el.getAttribute('placeholder') ||
+      el.getAttribute('name') ||
+      el.getAttribute('title') ||
+      el.value ||
+      ''
+    ).replace(/\s+/g, ' ').trim().slice(0, 100); // Clean and cap length
+  }
+
+  // Recursive function to walk DOM and Shadow DOM
+  function processNode(root) {
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_ELEMENT,
+      {
+        acceptNode: (node) => {
+          if (!isVisible(node)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    let node;
+    while ((node = walker.nextNode())) {
+      const tag = node.tagName.toLowerCase();
+      let isInteractive = false;
+      let role = tag;
+
+      // 1. Detect Interactivity
+      // Standard interactive tags
+      if (['a', 'button', 'select', 'textarea', 'details', 'summary'].includes(tag)) isInteractive = true;
+      // Inputs (skip hidden)
+      if (tag === 'input' && node.type !== 'hidden') isInteractive = true;
+      // ARIA roles or explicit click handlers
+      if (node.getAttribute('role') === 'button' || node.onclick) {
+        isInteractive = true;
+        role = 'button';
+      }
+
+      // 2. Capture Important Text (Context)
+      // Only non-interactive text containers to avoid duplication
+      if (!isInteractive && ['h1', 'h2', 'h3', 'p', 'li', 'span', 'div'].includes(tag)) {
+        // Get direct text content only (ignore children's text to prevent nesting noise)
+        const directText = Array.from(node.childNodes)
+          .filter(n => n.nodeType === Node.TEXT_NODE)
+          .map(n => n.textContent.trim())
+          .join(' ');
+
+        if (directText.length > 3) { // Ignore tiny artifacts
+          output.push(`    ${directText}`);
+        }
+      }
+
+      // 3. Register Interactive Element
+      if (isInteractive) {
+        window.uplink.idCounter++;
+        const id = window.uplink.idCounter;
+        let label = getLabel(node);
+
+        // Fallback for unlabeled inputs
+        if (!label && tag === 'input') label = '[Input]';
+        if (!label && tag === 'select') label = '[Dropdown]';
+
+        // Store reference
+        window.uplink.map.set(id, node);
+
+        output.push(`[${id}] <${role}> "${label}"`);
+      }
+
+      // 4. Handle Shadow DOM (Recursion)
+      if (node.shadowRoot) {
+        processNode(node.shadowRoot);
+      }
+    }
+  }
+
+  processNode(document.body);
+  return output.join('\n');
+}
+
 // --- Message Handler ---
 const api = (typeof chrome !== "undefined") ? chrome : browser;
 
@@ -60,71 +175,105 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Helper to resolve the promise safely
   const respond = (data) => sendResponse(data);
 
-  if (request.action === 'read') {
-    respond(document.body.innerText.substring(0, 10000)); // Limit to 10k chars
-    return true;
-  }
+  try {
+    // --- ACTION: READ ---
+    if (request.action === 'read') {
+      const format = request.format || 'distilled'; // Default to new parser
 
-  if (request.action === 'get_logs') {
-    respond(JSON.stringify(capturedLogs));
-    capturedLogs = []; // Clear after reading
-    return true;
-  }
+      if (format === 'html') {
+        respond(document.documentElement.outerHTML);
+      } else if (format === 'text') {
+        respond(document.body.innerText.substring(0, 10000));
+      } else {
+        // Default: Distilled
+        const snapshot = getPageSnapshot();
+        respond(snapshot);
+      }
+      return true;
+    }
 
-  if (request.action === 'execute') {
-    try {
+    if (request.action === 'get_logs') {
+      respond(JSON.stringify(capturedLogs));
+      capturedLogs = []; // Clear after reading
+      return true;
+    }
+
+    if (request.action === 'execute') {
       const result = eval(request.script);
       respond(String(result));
-    } catch (e) {
-      respond("Error: " + e.message);
+      return true;
     }
-    return true;
-  }
 
-  if (request.action === 'wait_for') {
-    const timeout = request.timeout || 15000;
-    const start = Date.now();
+    if (request.action === 'read_as_markdown') {
+      const md = htmlToMarkdown(document.body);
+      respond(md);
+      return true;
+    }
 
-    const check = () => {
-      const el = document.querySelector(request.selector);
-      if (el) {
-        // Highlight found element
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        createOverlay(el.getBoundingClientRect(), "Found");
-        respond("Found element");
-      } else if (Date.now() - start > timeout) {
-        respond({ error: `Timeout waiting for ${request.selector}` });
-      } else {
-        requestAnimationFrame(check); // Poll every frame
+    // --- RESOLVE ELEMENT (ID vs Selector) ---
+    // Universal element resolution for all interaction tools
+    let el = null;
+    const selector = request.selector;
+
+    // Check if selector is a numeric ID (e.g., "42")
+    if (selector && /^\d+$/.test(selector)) {
+      const id = parseInt(selector);
+      el = window.uplink.map.get(id);
+      if (!el) {
+        // If using an ID that doesn't exist, we can't really "wait" for it easily 
+        // without re-parsing, but for now we'll just fail or let wait_for handle it differently?
+        // For now, if ID not found, treat as null.
       }
-    };
-    check();
-    return true; // Async
-  }
+    } else if (selector) {
+      // Fallback to standard CSS selector
+      el = document.querySelector(selector);
+    }
 
-  if (request.action === 'read_as_markdown') {
-    const md = htmlToMarkdown(document.body);
-    respond(md);
-    return true;
-  }
+    // ACTION: WAIT_FOR (Special handling for polling)
+    if (request.action === 'wait_for') {
+      const timeout = request.timeout || 15000;
+      const start = Date.now();
 
-  // DOM Interaction requiring selectors (immediate)
-  try {
-    const el = document.querySelector(request.selector);
+      const check = () => {
+        let foundEl = null;
+        if (/^\d+$/.test(request.selector)) {
+          foundEl = window.uplink.map.get(parseInt(request.selector));
+        } else {
+          foundEl = document.querySelector(request.selector);
+        }
 
-    if (!el && request.action !== 'wait_for') {
+        if (foundEl) {
+          foundEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          createOverlay(foundEl.getBoundingClientRect(), "Found");
+          respond("Found element");
+        } else if (Date.now() - start > timeout) {
+          respond({ error: `Timeout waiting for ${request.selector}` });
+        } else {
+          requestAnimationFrame(check); // Poll every frame
+        }
+      };
+      check();
+      return true; // Async
+    }
+
+    // --- INTERACTION ---
+    if (!el) {
       respond({ error: `Element not found: ${request.selector}` });
       return true;
     }
 
+    // Standard interactions on 'el'
     if (request.action === 'highlight') {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       const rect = el.getBoundingClientRect();
-      createOverlay(rect, request.label);
+      createOverlay(rect, request.label || `ID: ${selector}`);
       respond("Highlighted");
     }
     else if (request.action === 'click') {
       el.click();
+      // Also dispatch generic events for React/Angular apps
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
       respond("Clicked");
     }
     else if (request.action === 'type') {
@@ -143,6 +292,7 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
         respond("Typed (ContentEditable)");
       } else {
         el.value = request.text;
+        // React/Angular often need these
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         respond("Typed");
@@ -165,7 +315,6 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       el.dispatchEvent(new MouseEvent('mouseenter', eventOptions));
       el.dispatchEvent(new MouseEvent('mousemove', eventOptions));
 
-      // Also fire pointer events for modern compatibility
       if (typeof PointerEvent !== 'undefined') {
         el.dispatchEvent(new PointerEvent('pointerover', { ...eventOptions, pointerType: 'mouse' }));
         el.dispatchEvent(new PointerEvent('pointerenter', { ...eventOptions, pointerType: 'mouse' }));
@@ -186,6 +335,7 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
     else if (request.action === 'get_html') {
       respond(el.outerHTML);
     }
+
   } catch (e) {
     respond({ error: e.toString() });
   }

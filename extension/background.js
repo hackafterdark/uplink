@@ -526,14 +526,16 @@ async function handleCommand(command) {
 
   if (command.action === "read") {
     try {
-      const results = await api.scripting.executeScript({
-        target: { tabId: tabId, allFrames: true },
-        func: () => document.body.innerText
-      });
-      const fullText = results.map(r => r.result).filter(t => t && t.trim().length > 0).join("\n\n--- Frame ---\n\n");
-      socket.send(JSON.stringify(fullText || "Page is empty"));
+      // Forward to content script which has the new DOM Parser
+      const response = await api.tabs.sendMessage(tabId, command);
+      socket.send(JSON.stringify(response || "Page is empty"));
     } catch (err) {
-      socket.send(JSON.stringify({ error: err.message }));
+      // Fallback if content script not loaded (e.g. restricted page)
+      if (err.message.includes("receiving end does not exist")) {
+        socket.send(JSON.stringify({ error: "Please reload the page to activate the extension." }));
+      } else {
+        socket.send(JSON.stringify({ error: err.message }));
+      }
     }
     return;
   }
@@ -543,17 +545,24 @@ async function handleCommand(command) {
       let targetFrameId = 0;
 
       if (command.selector) {
-        const searchResults = await api.scripting.executeScript({
-          target: { tabId: tabId, allFrames: true },
-          func: (sel) => !!document.querySelector(sel),
-          args: [command.selector]
-        });
-        const match = searchResults.find(r => r.result === true);
-        if (match) {
-          targetFrameId = match.frameId;
-        } else if (command.action !== 'wait_for') {
-          socket.send(JSON.stringify({ error: `Element not found: ${command.selector}` }));
-          return;
+        // If it's a numeric ID (Project Uplink), skip pre-check and assume Main Frame (0)
+        // because we can't querySelector an ID that only exists in the content script's memory.
+        if (/^\d+$/.test(command.selector)) {
+          targetFrameId = 0;
+        } else {
+          // Standard CSS Selector: Find which frame contains the element
+          const searchResults = await api.scripting.executeScript({
+            target: { tabId: tabId, allFrames: true },
+            func: (sel) => !!document.querySelector(sel),
+            args: [command.selector]
+          });
+          const match = searchResults.find(r => r.result === true);
+          if (match) {
+            targetFrameId = match.frameId;
+          } else if (command.action !== 'wait_for') {
+            socket.send(JSON.stringify({ error: `Element not found: ${command.selector}` }));
+            return;
+          }
         }
       }
 
