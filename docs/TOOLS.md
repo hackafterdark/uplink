@@ -19,6 +19,7 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | :--- | :--- | :--- |
 | `click_element` | Clicks an element. Supports Numeric IDs (e.g., "1") from `read_page` or CSS selectors. | `selector` (str), `purpose` (str, optional) |
 | `type_text` | Types text into an element. Supports Numeric IDs or CSS selectors. | `selector` (str), `text` (str) |
+| `press_key` | Presses a key on the page or specific element. | `key` (str), `selector` (str, optional) |
 | `hover_element` | Hovers over an element. Supports Numeric IDs or CSS selectors. | `selector` (str) |
 | `select_option` | Selects an option in a `<select>` element. Supports Numeric IDs or CSS selectors. | `selector` (str), `value` (str) |
 | `wait_for_element` | Waits for an element to appear (Numeric ID or CSS selector). Essential for React/SPA apps. | `selector` (str), `timeout` (int, default 15000) |

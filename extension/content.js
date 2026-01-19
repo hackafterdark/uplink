@@ -84,17 +84,58 @@ function getPageSnapshot() {
     );
   }
 
+  // Helper: Extract useful attributes (The "Bot Gold")
+  function getContextAttrs(el) {
+    const attrs = [];
+
+    // Input state
+    if (el.tagName === 'INPUT') {
+      const type = el.type;
+      if (type !== 'text') attrs.push(`type="${type}"`);
+      if (el.checked) attrs.push('checked');
+      if (el.value && type !== 'password' && type !== 'hidden') attrs.push(`value="${el.value.slice(0, 20)}"`);
+    }
+
+    // Stable IDs for testing/bots
+    const testId = el.getAttribute('data-testid') || el.getAttribute('data-cy') || el.getAttribute('data-action');
+    if (testId) attrs.push(`test-id="${testId}"`);
+
+    // ARIA role if specific
+    const role = el.getAttribute('role');
+    if (role && role !== el.tagName.toLowerCase()) attrs.push(`role="${role}"`);
+
+    return attrs.length > 0 ? ` (${attrs.join(' ')})` : '';
+  }
+
   // Helper: Get a meaningful label for the element
   function getLabel(el) {
-    return (
-      el.getAttribute('aria-label') ||
-      el.innerText ||
-      el.getAttribute('placeholder') ||
-      el.getAttribute('name') ||
-      el.getAttribute('title') ||
-      el.value ||
-      ''
-    ).replace(/\s+/g, ' ').trim().slice(0, 100); // Clean and cap length
+    let label = el.getAttribute('aria-label') || el.innerText || '';
+
+    // If empty, look deeper
+    if (!label.trim()) {
+      // 1. Check for images with alt text inside
+      const img = el.querySelector('img');
+      if (img && img.alt) {
+        label = `[IMG: ${img.alt}]`;
+      }
+      // 2. Standard attributes
+      else {
+        label = el.getAttribute('title') ||
+          el.getAttribute('placeholder') ||
+          el.getAttribute('data-testid') ||
+          el.getAttribute('name') ||
+          el.id ||
+          '';
+      }
+    }
+
+    // If still empty and it's a link, use truncated href
+    if (!label.trim() && el.tagName === 'A') {
+      const href = el.getAttribute('href');
+      if (href) label = `[Link: ${href.slice(0, 30)}...]`;
+    }
+
+    return label.replace(/\s+/g, ' ').trim().slice(0, 100);
   }
 
   // Recursive function to walk DOM and Shadow DOM
@@ -117,26 +158,21 @@ function getPageSnapshot() {
       let role = tag;
 
       // 1. Detect Interactivity
-      // Standard interactive tags
       if (['a', 'button', 'select', 'textarea', 'details', 'summary'].includes(tag)) isInteractive = true;
-      // Inputs (skip hidden)
       if (tag === 'input' && node.type !== 'hidden') isInteractive = true;
-      // ARIA roles or explicit click handlers
       if (node.getAttribute('role') === 'button' || node.onclick) {
         isInteractive = true;
         role = 'button';
       }
 
       // 2. Capture Important Text (Context)
-      // Only non-interactive text containers to avoid duplication
       if (!isInteractive && ['h1', 'h2', 'h3', 'p', 'li', 'span', 'div'].includes(tag)) {
-        // Get direct text content only (ignore children's text to prevent nesting noise)
         const directText = Array.from(node.childNodes)
           .filter(n => n.nodeType === Node.TEXT_NODE)
           .map(n => n.textContent.trim())
           .join(' ');
 
-        if (directText.length > 3) { // Ignore tiny artifacts
+        if (directText.length > 3) {
           output.push(`    ${directText}`);
         }
       }
@@ -147,17 +183,21 @@ function getPageSnapshot() {
         const id = window.uplink.idCounter;
         let label = getLabel(node);
 
-        // Fallback for unlabeled inputs
-        if (!label && tag === 'input') label = '[Input]';
-        if (!label && tag === 'select') label = '[Dropdown]';
+        // Fallback for unlabeled generic inputs
+        if (!label && tag === 'input') label = 'Input';
+        if (!label && tag === 'select') label = 'Dropdown';
+        if (!label) label = 'Element';
+
+        // Context attributes
+        const context = getContextAttrs(node);
 
         // Store reference
         window.uplink.map.set(id, node);
 
-        output.push(`[${id}] <${role}> "${label}"`);
+        output.push(`[${id}] <${role}> "${label}"${context}`);
       }
 
-      // 4. Handle Shadow DOM (Recursion)
+      // 4. Handle Shadow DOM
       if (node.shadowRoot) {
         processNode(node.shadowRoot);
       }
@@ -186,7 +226,15 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
         respond(document.body.innerText.substring(0, 10000));
       } else {
         // Default: Distilled
-        const snapshot = getPageSnapshot();
+        let snapshot = getPageSnapshot();
+        if (!snapshot.trim()) {
+          // Retry logic for hydrating pages
+          setTimeout(() => {
+            snapshot = getPageSnapshot();
+            respond(snapshot);
+          }, 1000);
+          return true; // Async wait
+        }
         respond(snapshot);
       }
       return true;
@@ -257,6 +305,11 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // --- INTERACTION ---
+    // Handle default target for press_key if no selector provided
+    if (!el && request.action === 'press_key' && !request.selector) {
+      el = document.activeElement || document.body;
+    }
+
     if (!el) {
       respond({ error: `Element not found: ${request.selector}` });
       return true;
@@ -297,6 +350,31 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
         el.dispatchEvent(new Event('change', { bubbles: true }));
         respond("Typed");
       }
+    }
+    else if (request.action === 'press_key') {
+      const key = request.key;
+      // Simple modifier check (not full support yet)
+      const options = {
+        key: key,
+        code: key, // 'Enter' -> 'Enter'
+        keyCode: key === 'Enter' ? 13 : 0,
+        which: key === 'Enter' ? 13 : 0,
+        bubbles: true,
+        cancelable: true,
+        view: window
+      };
+
+      el.dispatchEvent(new KeyboardEvent('keydown', options));
+      el.dispatchEvent(new KeyboardEvent('keypress', options));
+      el.dispatchEvent(new KeyboardEvent('keyup', options));
+
+      // If it's an input and we are "typing" a single char, might want input event
+      if (key.length === 1 && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+        // This is complex, so for now just rely on raw events or assume type_text is used for typing.
+        // press_key is mostly for navigation/submission (Enter, Tab, Esc).
+      }
+
+      respond(`Pressed ${key}`);
     }
     else if (request.action === 'hover') {
       el.scrollIntoView({ behavior: "smooth", block: "center" });

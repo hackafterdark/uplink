@@ -252,6 +252,20 @@ async def type_text(selector: str, text: str) -> str:
     })
 
 @mcp.tool()
+async def press_key(key: str, selector: str = None) -> str:
+    """Presses a key on the page or on a specific element.
+    ARGUMENTS:
+        key: The key to press (e.g., 'Enter', 'ArrowDown', 'Backspace', 'a', 'b').
+        selector: Optional. If provided, the key press is dispatched to this element.
+                  Otherwise, it is dispatched to the document/body.
+    """
+    return await send_command({
+        "action": "press_key",
+        "key": key,
+        "selector": selector
+    })
+
+@mcp.tool()
 async def hover_element(selector: str) -> str:
     """Hovers over an element defined by a CSS selector."""
     return await send_command({

@@ -540,7 +540,7 @@ async function handleCommand(command) {
     return;
   }
 
-  if (["click", "type", "highlight", "get_html", "wait_for"].includes(command.action)) {
+  if (["click", "type", "highlight", "get_html", "wait_for", "press_key"].includes(command.action)) {
     try {
       let targetFrameId = 0;
 
