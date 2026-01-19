@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Uplink",
+  "author": "HackAfterDark",
+  "version": "1.0",
+  "description": "Connects your browser to local AI using the Uplink MCP protocol.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "offscreen",
+    "tabCapture"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "inject_console.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "Browser Bridge",
+    "default_popup": "dashboard.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "browser-bridge@local.dev",
+      "strict_min_version": "109.0"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:* ws://localhost:*;"
+  }
+}

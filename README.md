@@ -30,6 +30,7 @@ It consists of two parts:
 *   **Cross-Platform**: Works on Windows, macOS, and Linux.
 
 ## 🛠️ Installation
+(For End Users)
 
 ### 1. Start the MCP Server
 You need Python 3.10+ installed.
@@ -49,11 +50,18 @@ pip install -r requirements.txt
 The server will start on `ws://127.0.0.1:8765`.
 
 ### 2. Install the Extension
-1.  Open your browser (Chrome, Edge, Brave, etc.).
-2.  Navigate to `chrome://extensions`.
-3.  Enable **Developer Mode** (top right).
-4.  Click **Load Unpacked**.
-5.  Select the `extension/` folder inside this project.
+We provide pre-built versions for Chrome and Firefox to handle their different manifest requirements (Service Workers vs. Event Pages).
+
+d.  **Chrome / Edge / Brave**:
+    1.  Navigate to `chrome://extensions`.
+    2.  Enable **Developer Mode**.
+    3.  Click **Load Unpacked**.
+    4.  Select the `dist/chrome` folder.
+
+e.  **Firefox / LibreWolf**:
+    1.  Navigate to `about:debugging#/runtime/this-firefox`.
+    2.  Click **Load Temporary Add-on...**.
+    3.  Select any file inside the `dist/firefox` folder.
 
 ### 3. Connect your AI
 Add the MCP server to your AI agent configuration (e.g., Claude Desktop config or custom MCP client).
@@ -112,7 +120,8 @@ Click the extension icon to open the **Uplink Control** dashboard.
 *   **Activity Log**: See exactly what the AI is doing in real-time.
 *   **Panic Button**: Stop the AI immediately.
 *   **Security Settings**: Configure rate limits and blocklists.
-*   **Downloads**: Screenshots and recordings are saved to your working directory by default.
+*   **Media Capture**: Screenshots and video recording.
+*   **Tools Documentation**: See [docs/TOOLS.md](docs/TOOLS.md) for a full list of available tools.
 
 ## 👥 Multi-Agent & Advanced Config
 
@@ -157,3 +166,20 @@ Uplink supports having the extension installed in multiple browsers (e.g., Chrom
 
 ---
 *Created by HackAfterDark*
+
+## 👨‍💻 Development & Building
+
+The `extension/` directory contains the source code. However, Chrome and Firefox require different `manifest.json` configurations.
+
+To avoid maintaining two separate codebases, we use a build script to generate the distribution folders.
+
+**If you make changes to the source code:**
+1.  Edit files in `extension/`.
+2.  Run the build script:
+    ```bash
+    python build_package.py
+    ```
+3.  This will update:
+    *   `dist/chrome` (Service Worker manifest)
+    *   `dist/firefox` (Event Page manifest)
+4.  Reload the extension in your browser to see changes.

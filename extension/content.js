@@ -1,40 +1,15 @@
 // --- Console Interception ---
-// We need to inject code into the main world to capture page logs
-const script = document.createElement('script');
-script.textContent = `
-    (function() {
-        const _log = console.log;
-        const _warn = console.warn;
-        const _error = console.error;
-        const logs = [];
-        
-        function capture(type, args) {
-            try {
-                // Convert args to string safely
-                const msg = args.map(a => 
-                    typeof a === 'object' ? JSON.stringify(a) : String(a)
-                ).join(' ');
-                
-                logs.push({type, msg, timestamp: Date.now()});
-                // Keep buffer small
-                if (logs.length > 500) logs.shift();
-                
-                // Dispatch event for content script
-                window.dispatchEvent(new CustomEvent('mcp-console-log', {
-                    detail: {type, msg, timestamp: Date.now()}
-                }));
-            } catch(e) {}
-        }
-        
-        console.log = (...args) => { capture('log', args); _log.apply(console, args); };
-        console.warn = (...args) => { capture('warn', args); _warn.apply(console, args); };
-        console.error = (...args) => { capture('error', args); _error.apply(console, args); };
-        
-        // Expose logs retrieval
-        window.__mcp_get_logs = () => logs;
-    })();
-`;
-(document.head || document.documentElement).appendChild(script);
+try {
+  // Inject script from file to avoid CSP inline-script violations
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL('inject_console.js');
+  script.onload = function () {
+    this.remove(); // Clean up script tag after loading
+  };
+  (document.head || document.documentElement).appendChild(script);
+} catch (e) {
+  console.log("Browser Bridge: Failed to inject console interceptor", e);
+}
 
 // Listen for the logs
 let capturedLogs = [];
@@ -127,6 +102,12 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Async
   }
 
+  if (request.action === 'read_as_markdown') {
+    const md = htmlToMarkdown(document.body);
+    respond(md);
+    return true;
+  }
+
   // DOM Interaction requiring selectors (immediate)
   try {
     const el = document.querySelector(request.selector);
@@ -167,6 +148,41 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
         respond("Typed");
       }
     }
+    else if (request.action === 'hover') {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const rect = el.getBoundingClientRect();
+      createOverlay(rect, "Hovering");
+
+      const eventOptions = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2
+      };
+
+      el.dispatchEvent(new MouseEvent('mouseover', eventOptions));
+      el.dispatchEvent(new MouseEvent('mouseenter', eventOptions));
+      el.dispatchEvent(new MouseEvent('mousemove', eventOptions));
+
+      // Also fire pointer events for modern compatibility
+      if (typeof PointerEvent !== 'undefined') {
+        el.dispatchEvent(new PointerEvent('pointerover', { ...eventOptions, pointerType: 'mouse' }));
+        el.dispatchEvent(new PointerEvent('pointerenter', { ...eventOptions, pointerType: 'mouse' }));
+        el.dispatchEvent(new PointerEvent('pointermove', { ...eventOptions, pointerType: 'mouse' }));
+      }
+
+      respond("Hovered");
+    }
+    else if (request.action === 'select_option') {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      createOverlay(el.getBoundingClientRect(), `Selecting: ${request.value}`);
+
+      el.value = request.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      respond("Option Selected");
+    }
     else if (request.action === 'get_html') {
       respond(el.outerHTML);
     }
@@ -176,3 +192,88 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   return true; // Keep channel open
 });
+
+// --- Markdown Converter ---
+function htmlToMarkdown(root) {
+  let output = '';
+
+  function walk(node, indent = 0) {
+    if (!node) return;
+
+    // Ignore invisible or irrelevant elements
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const style = window.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+
+      const tag = node.tagName.toLowerCase();
+      if (['script', 'style', 'noscript', 'iframe', 'svg', 'button', 'input', 'select', 'textarea'].includes(tag)) return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      let text = node.textContent.replace(/\s+/g, ' ');
+      if (text.trim()) output += text;
+      return;
+    }
+
+    const tag = node.tagName.toLowerCase();
+    let prefix = '';
+    let suffix = '';
+
+    if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+      prefix = '\n\n' + '#'.repeat(parseInt(tag[1])) + ' ';
+      suffix = '\n';
+    } else if (tag === 'p') {
+      prefix = '\n\n';
+      suffix = '\n';
+    } else if (tag === 'br') {
+      output += '  \n';
+      return;
+    } else if (tag === 'a') {
+      output += '[';
+      // Children will populate the text
+    } else if (tag === 'strong' || tag === 'b') {
+      output += '**';
+    } else if (tag === 'em' || tag === 'i') {
+      output += '_';
+    } else if (tag === 'code') {
+      output += '`';
+    } else if (tag === 'pre') {
+      prefix = '\n```\n';
+      suffix = '\n```\n';
+    } else if (tag === 'li') {
+      prefix = '\n' + '  '.repeat(indent) + '- ';
+    } else if (tag === 'ul' || tag === 'ol') {
+      // increase indentation for children
+      indent++;
+    } else if (tag === 'img') {
+      const alt = node.getAttribute('alt') || 'image';
+      const src = node.getAttribute('src') || '';
+      if (src) output += `![${alt}](${src})`;
+      return; // No children needed for img
+    }
+
+    output += prefix;
+
+    // Process children
+    for (let child of node.childNodes) {
+      walk(child, indent);
+    }
+
+    // Closing tags
+    if (tag === 'a') {
+      const href = node.getAttribute('href') || '#';
+      output += `](${href})`;
+    } else if (tag === 'strong' || tag === 'b') {
+      output += '**';
+    } else if (tag === 'em' || tag === 'i') {
+      output += '_';
+    } else if (tag === 'code') {
+      output += '`';
+    }
+
+    output += suffix;
+  }
+
+  walk(root);
+  return output.replace(/\n{3,}/g, '\n\n').trim();
+}

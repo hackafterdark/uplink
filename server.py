@@ -3,13 +3,14 @@ import asyncio
 import websockets
 import json
 import base64
-import base64
-import base64
+
 import os
+import argparse
 import pathlib
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
+
 
 import logging
 
@@ -89,27 +90,9 @@ async def handler(websocket):
                 browser_socket = None
         logging.info("❌ Browser Disconnected")
 
-# --- CLI Args ---
-# Fallback: If port is still default, check if user passed a bare number in args (e.g. ["8766"] or ["port", "8766"])
-if PORT == 8765 and unknown:
-    for arg in unknown:
-        try:
-            val = int(arg)
-            if 1024 < val < 65536:
-                PORT = val
-                logging.info(f"Found loose port argument: {PORT}")
-                break
-        except ValueError:
-            pass
+# (Removed redundant/misplaced arg parsing block)
 
-# CLI Args: Downloads Directory
-parser.add_argument("--downloads", type=str, default=None, help="Directory to save screenshots and recordings")
-# Re-parse to catch new arg if explicitly provided (ignoring the previous parse_known_args limitation for simplicity here, 
-# but effectively we should just reuse 'args' if we defined it earlier. However, since we defined 'parser' above, 
-# we can just add the argument now and re-parse or check 'unknown' if we were strict. 
-# For simplicity in this script structure where we parse at line 95:
-# We need to re-structure the arg parsing slightly to be clean.
-# Let's do it cleanly below.)
+# (Removed redundant code)
 
 # Re-doing arg parsing block for clarity since we are adding more args
 parser = argparse.ArgumentParser()
@@ -143,9 +126,24 @@ logging.info(f"Downloads directory set to: {DOWNLOAD_DIR}")
 
 async def start_ws():
     logging.info(f"Starting WebSocket server on port {PORT} (ws://127.0.0.1:{PORT})...")
-    # Aggressive keep-alive (5s ping) to keep Service Worker alive
-    async with websockets.serve(handler, "127.0.0.1", PORT, ping_interval=5, ping_timeout=10):
-        await asyncio.Future()  # Run forever
+    print(f"DEBUG: Attempting to start WebSocket server on port {PORT}...")
+    try:
+        # Aggressive keep-alive (5s ping) to keep Service Worker alive
+        async with websockets.serve(handler, "127.0.0.1", PORT, ping_interval=5, ping_timeout=10):
+            print(f"DEBUG: WebSocket server running on ws://127.0.0.1:{PORT}")
+            logging.info("WebSocket server started successfully")
+            await asyncio.Future()  # Run forever
+    except OSError as e:
+        if e.errno == 10048: # Address already in use (Windows) or 98 (Linux)
+            msg = f"ERROR: Port {PORT} is already in use! Please close other server instances or specify a different port."
+            print(msg)
+            logging.error(msg)
+        else:
+            print(f"ERROR: Failed to start WebSocket server: {e}")
+            logging.error(f"Failed to start WebSocket server: {e}")
+    except Exception as e:
+        print(f"CRITICAL ERROR: {e}")
+        logging.error(f"CRITICAL ERROR: {e}")
 
 # --- MCP Lifecycle ---
 @asynccontextmanager
@@ -227,6 +225,23 @@ async def type_text(selector: str, text: str) -> str:
     })
 
 @mcp.tool()
+async def hover_element(selector: str) -> str:
+    """Hovers over an element defined by a CSS selector."""
+    return await send_command({
+        "action": "hover",
+        "selector": selector
+    })
+
+@mcp.tool()
+async def select_option(selector: str, value: str) -> str:
+    """Selects an option in a <select> element by its value."""
+    return await send_command({
+        "action": "select_option",
+        "selector": selector,
+        "value": value
+    })
+
+@mcp.tool()
 async def execute_script(script: str) -> str:
     """Executes arbitrary JavaScript in the active tab context. 
     The script should return a value."""
@@ -249,6 +264,30 @@ async def navigate(url: str) -> str:
     return await send_command({
         "action": "navigate",
         "url": url
+    })
+
+@mcp.tool()
+async def go_back() -> str:
+    """Navigates back in the browser history."""
+    return await send_command({"action": "go_back"})
+
+@mcp.tool()
+async def go_forward() -> str:
+    """Navigates forward in the browser history."""
+    return await send_command({"action": "go_forward"})
+
+@mcp.tool()
+async def reload_page() -> str:
+    """Reloads the current page."""
+    return await send_command({"action": "reload_page"})
+
+@mcp.tool()
+async def set_viewport(width: int, height: int) -> str:
+    """Resizes the browser window to the specified dimensions."""
+    return await send_command({
+        "action": "set_viewport",
+        "width": width,
+        "height": height
     })
 
 @mcp.tool()
@@ -290,6 +329,52 @@ async def get_session_storage(key: str) -> str:
         "storageType": "session",
         "key": key
     })
+
+@mcp.tool()
+async def set_local_storage(key: str, value: str) -> str:
+    """Sets a value in the page's localStorage."""
+    return await send_command({
+        "action": "set_storage",
+        "storageType": "local",
+        "key": key,
+        "value": value
+    })
+
+@mcp.tool()
+async def clear_local_storage() -> str:
+    """Clears all data from the page's localStorage."""
+    return await send_command({
+        "action": "clear_storage",
+        "storageType": "local"
+    })
+
+@mcp.tool()
+async def get_cookies() -> str:
+    """Returns all cookies for the current page (document.cookie). 
+    Note: HttpOnly cookies are not visible."""
+    return await send_command({"action": "get_cookies"})
+
+@mcp.tool()
+async def set_cookie(name: str, value: str) -> str:
+    """Sets a cookie using document.cookie."""
+    return await send_command({
+        "action": "set_cookie",
+        "name": name,
+        "value": value
+    })
+
+@mcp.tool()
+async def get_page_metadata() -> str:
+    """Returns metadata for the active page (title, description, image, etc)."""
+    return await send_command({"action": "get_metadata"})
+
+@mcp.tool()
+async def read_as_markdown() -> str:
+    """Converts the active page's HTML content to Markdown. 
+    Useful for LLM contexts and RAG."""
+    # The conversion now happens in the browser extension to avoid
+    # transferring massive HTML strings which can crash the browser/connection.
+    return await send_command({"action": "read_as_markdown"})
 
 @mcp.tool()
 async def screenshot(save_path: str = None) -> str:

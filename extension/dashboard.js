@@ -110,6 +110,13 @@ port.onMessage.addListener((msg) => {
       localFileToggle.checked = msg.state.allowLocalFiles;
     }
 
+    // Update Data Tools Switch
+    if (dataToolsToggle && msg.state.allowDataTools !== undefined) {
+      if (dataToolsToggle.checked !== msg.state.allowDataTools) {
+        dataToolsToggle.checked = msg.state.allowDataTools;
+      }
+    }
+
     // Update Blocklist UI
     const list = msg.state.userBlocklist || [];
     renderBlocklist(list);
@@ -153,6 +160,13 @@ panicToggle.addEventListener('change', (e) => {
 localFileToggle.addEventListener('change', (e) => {
   const allowed = e.target.checked;
   port.postMessage({ type: "SET_LOCAL_FILES", value: allowed });
+});
+
+// Data Tools Toggle
+const dataToolsToggle = document.getElementById('dataToolsToggle');
+dataToolsToggle.addEventListener('change', (e) => {
+  const allowed = e.target.checked;
+  port.postMessage({ type: "SET_ALLOW_DATA_TOOLS", value: allowed });
 });
 
 // Blocklist Input Handler

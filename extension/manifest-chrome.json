@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
-    "name": "Uplink (Firefox/LibreWolf)",
+    "name": "Uplink (Chrome/Edge)",
     "author": "HackAfterDark",
     "version": "1.0",
-    "description": "Connects your browser to local AI using the Uplink MCP protocol. (Firefox Version)",
+    "description": "Connects your browser to local AI using the Uplink MCP protocol.",
     "permissions": [
         "activeTab",
         "scripting",
@@ -15,9 +15,7 @@
         "<all_urls>"
     ],
     "background": {
-        "scripts": [
-            "background.js"
-        ],
+        "service_worker": "background.js",
         "type": "module"
     },
     "content_scripts": [
@@ -47,7 +45,7 @@
     },
     "browser_specific_settings": {
         "gecko": {
-            "id": "browser-bridge-firefox@local.dev",
+            "id": "browser-bridge-chrome@local.dev",
             "strict_min_version": "109.0"
         }
     },

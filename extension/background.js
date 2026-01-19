@@ -8,6 +8,7 @@ let logHistory = []; // persist logs in memory
 
 // --- SECURITY STATE ---
 let allowLocalFiles = false; // Default: Block file://
+let allowDataTools = true; // Default: Allow cookies/storage
 let userBlocklist = []; // User-defined glob patterns
 let lastCommandTime = 0;
 let rateLimitMs = 500; // Default 500ms
@@ -20,8 +21,9 @@ const MAX_SCRIPT_LENGTH = 100000;
 const RESTRICTED_PROTOCOLS = ['chrome:', 'edge:', 'about:', 'brave:', 'opera:'];
 
 // Load saved security settings
-api.storage.local.get(['allowLocalFiles', 'userBlocklist', 'panicMode', 'rateLimitMs', 'serverPort'], (result) => {
+api.storage.local.get(['allowLocalFiles', 'allowDataTools', 'userBlocklist', 'panicMode', 'rateLimitMs', 'serverPort'], (result) => {
   if (result.allowLocalFiles !== undefined) allowLocalFiles = result.allowLocalFiles;
+  if (result.allowDataTools !== undefined) allowDataTools = result.allowDataTools;
   if (result.userBlocklist !== undefined) userBlocklist = result.userBlocklist;
   if (result.panicMode !== undefined) panicMode = result.panicMode;
   if (result.rateLimitMs !== undefined) rateLimitMs = result.rateLimitMs;
@@ -247,6 +249,11 @@ chrome.runtime.onConnect.addListener((port) => {
           api.storage.local.set({ allowLocalFiles: allowLocalFiles });
           broadcastState();
         }
+        if (msg.type === "SET_ALLOW_DATA_TOOLS") {
+          allowDataTools = msg.value;
+          api.storage.local.set({ allowDataTools: allowDataTools });
+          broadcastState();
+        }
         if (msg.type === "ADD_BLOCKLIST_ITEM") {
           if (!Array.isArray(userBlocklist)) userBlocklist = [];
           if (!userBlocklist.includes(msg.value)) {
@@ -295,6 +302,7 @@ function broadcastState() {
     connected: socket && socket.readyState === WebSocket.OPEN,
     panicMode: panicMode,
     allowLocalFiles: allowLocalFiles,
+    allowDataTools: allowDataTools,
     userBlocklist: userBlocklist,
     rateLimitMs: rateLimitMs,
     serverPort: serverPort,
@@ -398,9 +406,18 @@ async function handleCommand(command) {
     return;
   }
 
-  if (command.action === "navigate") {
+  if (command.action === "navigate" || command.action === "go_back" || command.action === "go_forward" || command.action === "reload_page") {
     try {
-      await api.tabs.update(tabId, { url: command.url });
+      if (command.action === "go_back") {
+        await api.tabs.goBack(tabId);
+      } else if (command.action === "go_forward") {
+        await api.tabs.goForward(tabId);
+      } else if (command.action === "reload_page") {
+        await api.tabs.reload(tabId);
+      } else {
+        await api.tabs.update(tabId, { url: command.url });
+      }
+
       await new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           api.tabs.onUpdated.removeListener(listener);
@@ -417,7 +434,22 @@ async function handleCommand(command) {
         api.tabs.onUpdated.addListener(listener);
       });
 
-      socket.send(JSON.stringify(`Navigated to ${command.url}`));
+      socket.send(JSON.stringify("Navigation Complete"));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (command.action === "set_viewport") {
+    try {
+      const windowId = await api.windows.getCurrent().then(w => w.id);
+      await api.windows.update(windowId, {
+        width: command.width,
+        height: command.height,
+        state: "normal" // Ensure not maximized/minimized
+      });
+      socket.send(JSON.stringify(`Viewport set to ${command.width}x${command.height}`));
     } catch (err) {
       socket.send(JSON.stringify({ error: err.message }));
     }
@@ -556,6 +588,63 @@ async function handleCommand(command) {
     return;
   }
 
+
+  // --- DATA TOOL SECURITY CHECK ---
+  if (['get_cookies', 'set_cookie', 'get_storage', 'set_storage', 'clear_storage'].includes(command.action)) {
+    if (!allowDataTools) {
+      socket.send(JSON.stringify({ error: "Data tools are disabled by security policy." }));
+      return;
+    }
+  }
+
+  // --- REDACTION HELPER ---
+  const sanitize = (data) => {
+    if (!data) return data;
+    const sensitiveKeys = ['token', 'auth', 'key', 'password', 'secret', 'session'];
+    // Simple key-value pair redaction for cookies/storage objects
+    // If it's a string (cookies), we might need regex, but let's assume raw string for now.
+    // Actually, for document.cookie it's "key=value; key2=value2"
+
+    // For string output (Cookies)
+    if (typeof data === 'string') {
+      let masked = data;
+      sensitiveKeys.forEach(key => {
+        const regex = new RegExp(`(${key}[^=]*)=([^;]*)`, 'gi');
+        masked = masked.replace(regex, '$1=********(Redacted)');
+      });
+      return masked;
+    }
+    return data;
+  }
+
+  if (command.action === "get_cookies") {
+    try {
+      const results = await api.scripting.executeScript({
+        target: { tabId: tabId },
+        func: () => document.cookie
+      });
+      const rawCookies = results[0].result || "";
+      socket.send(JSON.stringify(sanitize(rawCookies)));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (command.action === "set_cookie") {
+    try {
+      await api.scripting.executeScript({
+        target: { tabId: tabId },
+        func: (n, v) => { document.cookie = `${n}=${v}; path=/`; },
+        args: [command.name, command.value]
+      });
+      socket.send(JSON.stringify(`Cookie set: ${command.name}`));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
   if (command.action === "get_storage") {
     try {
       const results = await api.scripting.executeScript({
@@ -568,6 +657,75 @@ async function handleCommand(command) {
           } catch (e) { return null; }
         },
         args: [command.storageType, command.key]
+      });
+      // Sanitize single value if key is sensitive
+      let val = results[0].result;
+      const keyLower = command.key.toLowerCase();
+      if (['token', 'auth', 'key', 'password', 'secret', 'session'].some(s => keyLower.includes(s))) {
+        val = "******** (Redacted)";
+      }
+      socket.send(JSON.stringify(val));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (command.action === "set_storage") {
+    try {
+      await api.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: (type, key, value) => {
+          const storage = (type === 'session') ? window.sessionStorage : window.localStorage;
+          storage.setItem(key, value);
+        },
+        args: [command.storageType, command.key, command.value]
+      });
+      socket.send(JSON.stringify(`Storage set: ${command.key}`));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (command.action === "clear_storage") {
+    try {
+      await api.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: (type) => {
+          const storage = (type === 'session') ? window.sessionStorage : window.localStorage;
+          storage.clear();
+        },
+        args: [command.storageType]
+      });
+      socket.send(JSON.stringify("Storage cleared"));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (command.action === "get_metadata") {
+    try {
+      const results = await api.scripting.executeScript({
+        target: { tabId: tabId },
+        func: () => {
+          const getMeta = (name) => {
+            const el = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
+            return el ? el.content : null;
+          };
+          return {
+            title: document.title,
+            description: getMeta('description') || getMeta('og:description'),
+            keywords: getMeta('keywords'),
+            author: getMeta('author'),
+            ogImage: getMeta('og:image'),
+            ogUrl: getMeta('og:url'),
+            favicon: document.querySelector('link[rel~="icon"]')?.href
+          };
+        }
       });
       socket.send(JSON.stringify(results[0].result));
     } catch (err) {
