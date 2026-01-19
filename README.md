@@ -156,16 +156,21 @@ Uplink includes a smart typing tool that handles:
 
 ## 🌐 Multi-Browser Support
 
-Uplink supports having the extension installed in multiple browsers (e.g., Chrome, Edge, Firefox) simultaneously, but **only one browser can be connected to the AI at a time**.
+Uplink supports having the extension installed in multiple browsers (e.g., Chrome, Edge, Firefox) simultaneously. You can use this in two ways:
 
-**How to manage connections:**
-1.  **Dashboard Status**: The extension popup shows a status badge (Green for **Connected**, Red for **Disconnected**).
-2.  **Toggle Connection**: Click the badge to manually Connect or Disconnect that specific browser.
-3.  **Last One Wins**: If you open a new browser or reload the extension, it will automatically claim the connection, disconnecting any other active browser.
-4.  **Exclusive Control**: The AI will only send commands (navigation, clicks, etc.) to the currently connected browser. The disconnected browser will remain completely passive.
+### 1. Sequential (One Agent, Multiple Browsers)
+If you only have **one** AI agent running (one MCP server on port 8765), you can switch which browser it controls on the fly.
 
----
-*Created by HackAfterDark*
+*   **Last One Wins**: If you open a new browser or reload the extension, it will automatically claim the connection, disconnecting the previous one.
+*   **Exclusive Control**: The AI defaults to controlling the last "active" browser. You can manually click the **Status Badge** in the extension dashboard to disconnect/reconnect specific browsers.
+
+### 2. Parallel (Multiple Agents, Multiple Browsers)
+You can run multiple AI agents simultaneously, each controlling a different browser (e.g., one agent for research on Chrome, another for testing on Firefox).
+
+1.  Start server A on port `8765` -> Connect Chrome (Default port).
+2.  Start server B on port `8766` -> Connect Firefox (Update Port in Dashboard -> 8766).
+
+This allows independent control of multiple browser sessions at the same time.
 
 ## 👨‍💻 Development & Building
 
