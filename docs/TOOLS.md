@@ -6,7 +6,7 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
-| `navigate` | Navigates the active tab to a new URL and waits for the page to load. | `url` (str) |
+| `navigate` | Navigates the active tab to a new URL and waits for the page to load. (Subject to **Blocklist** and **Local File** settings) | `url` (str) |
 | `open_tab` | Opens a new browser tab with the specified URL. | `url` (str) |
 | `go_back` | Navigates back in the browser history. | None |
 | `go_forward` | Navigates forward in the browser history. | None |
@@ -36,13 +36,15 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 
 ## Storage & Cookies
 
+> **Note**: All tools in this section are controlled by the **Allow Data Access** toggle in the extension dashboard. (Default: **Enabled**)
+
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
 | `get_local_storage` | Retrieves a value from the page's localStorage. | `key` (str) |
 | `set_local_storage` | Sets a value in the page's localStorage. | `key` (str), `value` (str) |
 | `clear_local_storage` | Clears all data from the page's localStorage. | None |
 | `get_session_storage` | Retrieves a value from the page's sessionStorage. | `key` (str) |
-| `get_cookies` | Returns all cookies for the current page (document.cookie). (HttpOnly hidden) | None |
+| `get_cookies` | Returns all cookies for the current page (document.cookie). **Cannot read `HttpOnly` cookies.** | None |
 | `set_cookie` | Sets a cookie using document.cookie. | `name` (str), `value` (str) |
 
 ## Media
@@ -50,5 +52,5 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
 | `screenshot` | Takes a screenshot of the active tab. | `save_path` (str, optional) |
-| `start_recording` | Starts video recording of the active tab. | None |
-| `stop_recording` | Stops the video recording and saves it. | `save_path` (str, optional) |
+| `start_recording` | Starts video recording of the active tab. (Supported: Chrome, Edge, Brave) | None |
+| `stop_recording` | Stops the video recording and saves it. (Supported: Chrome, Edge, Brave) | `save_path` (str, optional) |
