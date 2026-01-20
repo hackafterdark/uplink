@@ -510,6 +510,26 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true; // Async wait
     }
 
+    // --- GLOBAL ACTIONS (No Element Required) ---
+    if (request.action === 'scroll_page') {
+      const direction = request.direction || 'down';
+      const start = performance.now();
+
+      // Scroll amount: 80% of viewport height
+      const amount = window.innerHeight * 0.8;
+
+      if (direction === 'down') window.scrollBy({ top: amount, behavior: 'smooth' });
+      else if (direction === 'up') window.scrollBy({ top: -amount, behavior: 'smooth' });
+      else if (direction === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+      else if (direction === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+
+      setTimeout(() => {
+        const duration = Math.round(performance.now() - start);
+        respond(`Scrolled ${direction} (Internal: ${duration}ms)`);
+      }, 500);
+      return true; // Async
+    }
+
     // --- RESOLVE ELEMENT (ID vs Selector) ---
     // Universal element resolution for all interaction tools
     let el = null;
@@ -612,6 +632,7 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
         respond(`Typed (${duration}ms)`);
       }
     }
+
     else if (request.action === 'press_key') {
       const start = performance.now();
       const key = request.key;

@@ -363,6 +363,22 @@ async def set_viewport(width: int, height: int) -> str:
     })
 
 @mcp.tool()
+async def scroll_page(direction: str = "down") -> str:
+    """Scrolls the page. Directions: 'up', 'down', 'top', 'bottom'."""
+    return await send_command({
+        "action": "scroll_page",
+        "direction": direction
+    })
+
+@mcp.tool()
+async def scroll_into_view(selector: str) -> str:
+    """Scrolls an element into view. Accepts a CSS selector or numeric ID."""
+    return await send_command({
+        "action": "scroll_into_view",
+        "selector": selector
+    })
+
+@mcp.tool()
 async def get_console_logs() -> str:
     """Retrieves captured console logs from the browser extension."""
     return await send_command({"action": "get_logs"})
