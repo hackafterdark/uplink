@@ -2,6 +2,9 @@
 
 # Uplink Server Startup Script (macOS / Linux)
 
+# Ensure we are in the script's directory so relative paths work
+cd "$(dirname "$0")" || exit
+
 echo "Stopping any existing Uplink server instances..."
 # Kill processes matching "server.py" to release the port
 # pkill -f "python.*server.py" 2>/dev/null

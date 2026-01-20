@@ -1,6 +1,9 @@
 @echo off
 rem Removed global taskkill to allow multiple server instances
 
+rem Switch to script directory
+pushd "%~dp0"
+
 rem Check for virtual environment
 if not exist "%~dp0venv" (
     echo Creating virtual environment...
