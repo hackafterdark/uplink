@@ -402,6 +402,55 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
+    if (request.action === 'audit_accessibility') {
+      if (typeof axe === 'undefined') {
+        respond({ error: 'axe-core library not loaded. Please ensure axe.min.js is injected.' });
+        return true;
+      }
+
+      // Ensure map is hydrated so we can match elements to IDs
+      if (window.uplink.map.size === 0) {
+        getPageSnapshot();
+      }
+
+      const reverseMap = new Map();
+      for (const [id, el] of window.uplink.map.entries()) {
+        reverseMap.set(el, id);
+      }
+
+      axe.run().then(results => {
+        const violations = results.violations.map(v => {
+          return {
+            id: v.id,
+            impact: v.impact,
+            description: v.description,
+            nodes: v.nodes.map(node => {
+              const el = node.element;
+              const mcpId = reverseMap.get(el);
+              return {
+                mcpId: mcpId || "N/A",
+                target: node.target,
+                html: node.html.slice(0, 100),
+                failureSummary: node.failureSummary
+              };
+            })
+          };
+        });
+
+        respond({
+          url: results.url,
+          timestamp: results.timestamp,
+          violations: violations,
+          passesCount: results.passes.length,
+          incompleteCount: results.incomplete.length
+        });
+      }).catch(err => {
+        respond({ error: `Axe Run Error: ${err.message}` });
+      });
+
+      return true; // Async
+    }
+
 
     // --- SEMANTIC SEARCH (Pre-Resolution) ---
     if (request.action === 'semantic_find') {

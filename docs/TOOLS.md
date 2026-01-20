@@ -74,5 +74,6 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `check_errors` | Analyzes browser console errors and network failures. Returns a **semantically clustered** summary of issues. | None |
 | `manage_session` | Clears browser session state (cookies, local storage) and captured logs. | `action` (str, optional: 'clear' (default), 'clear_logs') |
 | `get_page_performance` | Returns a holistic performance report: TTFB, FCP, Page Load, and **Interaction Timings**. | None |
+| `audit_accessibility` | Checks the page for accessibility violations using **axe-core**. Returns a summarized report mapped to Numeric IDs. | None |
 | `get_console_logs` | Retrieves raw captured console logs from the browser extension. Moved here from Data Extraction. | None |
 

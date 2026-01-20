@@ -617,5 +617,40 @@ async def manage_session(action: str = "clear") -> str:
         "command": action
     })
 
+@mcp.tool()
+async def audit_accessibility() -> str:
+    """
+    Checks the current page for accessibility violations using axe-core.
+    Returns a summarized markdown report of violations with Numeric IDs for elements.
+    """
+    raw_response = await send_command({"action": "audit_accessibility"})
+    
+    try:
+        result = json.loads(raw_response)
+    except:
+        return f"Error parsing response: {raw_response}"
+
+    if "error" in result:
+        return f"Error: {result['error']}"
+
+    violations = result.get('violations', [])
+    if not violations:
+        return "## Accessibility Audit\n✅ No violations found!"
+
+    report = ["## Accessibility Audit", f"Found {len(violations)} types of violations.", ""]
+    
+    for v in violations:
+        report.append(f"### {v['id'].upper()} ({v['impact']})")
+        report.append(f"**Description**: {v['description']}")
+        report.append("**Affected Elements:**")
+        for node in v.get('nodes', []):
+            mcp_id = node.get('mcpId', 'N/A')
+            report.append(f"- [ID: {mcp_id}] `{node['html']}`")
+            report.append(f"  * Fix: {node['failureSummary']}")
+        report.append("")
+
+    report.append(f"Summary: {result.get('passesCount', 0)} checks passed, {result.get('incompleteCount', 0)} checks need manual review.")
+    return "\n".join(report)
+
 if __name__ == "__main__":
     mcp.run()

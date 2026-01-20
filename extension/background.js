@@ -601,6 +601,31 @@ async function handleCommand(command) {
   }
   const tabId = tabs[0].id;
 
+  if (command.action === "audit_accessibility") {
+    try {
+      // 1. Check if axe is already loaded, if not inject it
+      const checkAxe = await api.scripting.executeScript({
+        target: { tabId: tabId },
+        func: () => typeof axe !== 'undefined'
+      });
+
+      if (!checkAxe[0].result) {
+        broadcastLog("mcp", "Injecting axe-core...");
+        await api.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['axe.min.js']
+        });
+      }
+
+      // 2. Forward to content script for execution
+      const response = await api.tabs.sendMessage(tabId, command);
+      socket.send(JSON.stringify(response));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: `Accessibility Audit Failed: ${err.message}` }));
+    }
+    return;
+  }
+
   if (command.action === "screenshot") {
     try {
       const dataUrl = await api.tabs.captureVisibleTab(null, { format: "png" });
