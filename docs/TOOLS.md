@@ -12,6 +12,7 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `go_forward` | Navigates forward in the browser history. | None |
 | `reload_page` | Reloads the current page. | None |
 | `set_viewport` | Resizes the browser window to the specified dimensions. | `width` (int), `height` (int) |
+| `scroll_page` | Scrolls the page in a specified direction. Supports 'up', 'down', 'top', 'bottom'. | `direction` (str, default 'down') |
 
 ## Interaction
 
@@ -26,6 +27,7 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `hover_element` | Hovers over an element. Supports Numeric IDs or CSS selectors. | `selector` (str) |
 | `select_option` | Selects an option in a `<select>` element. Supports Numeric IDs or CSS selectors. | `selector` (str), `value` (str) |
 | `wait_for_element` | Waits for an element to appear (Numeric ID or CSS selector). Essential for React/SPA apps. Returns wait duration. | `selector` (str), `timeout` (int, default 15000) |
+| `scroll_into_view` | Scrolls a specific element into the viewport. Supports Numeric IDs or CSS selectors. | `selector` (str) |
 | `execute_script` | Executes arbitrary JavaScript in the active tab context. Returns the result. | `script` (str) |
 
 ## Data Extraction
