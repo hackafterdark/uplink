@@ -1,3 +1,15 @@
+import { pipeline, env } from './transformers.js';
+
+// Configure transformers.js for extension use
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+// MV3 Service Worker Fix: Disable worker spawning (requires blob:)
+env.backends.onnx.wasm.proxy = false;
+env.backends.onnx.wasm.numThreads = 1;
+
+// EXPLICITLY load WASM from CDN (since JS is now local, it might look locally)
+env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.16.1/dist/';
+
 const api = (typeof chrome !== "undefined") ? chrome : browser;
 let socket = null;
 let keepAliveInterval = null;
@@ -14,6 +26,158 @@ let lastCommandTime = 0;
 let rateLimitMs = 500; // Default 500ms
 let serverPort = 8765; // Default Port
 
+// --- AI MODEL STATE ---
+let embedder = null;
+let modelLoading = false;
+let aiModelId = 'Xenova/all-MiniLM-L6-v2'; // Default
+let customHubUrl = null;
+
+// --- DEBUG STATE ---
+let lastError = null;
+let debugLog = [];
+
+function logDebug(msg) {
+  const entry = new Date().toISOString() + " " + msg;
+  debugLog.push(entry);
+  if (debugLog.length > 50) debugLog.shift();
+  console.log(msg);
+  api.storage.local.set({ debugLog: debugLog, lastError: lastError });
+}
+
+// Helpers: Vector Math
+function dotProduct(a, b) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
+}
+
+function magnitude(a) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * a[i];
+  return Math.sqrt(sum);
+}
+
+function cosineSimilarity(a, b) {
+  return dotProduct(a, b) / (magnitude(a) * magnitude(b));
+}
+
+// Helper: Load Model Singleton
+async function loadModel() {
+  // If model is already loaded and matches requested ID, return it
+  if (embedder && embedder.modelId === aiModelId) return embedder;
+
+  if (modelLoading) {
+    // Wait for existing load
+    while (modelLoading) await new Promise(r => setTimeout(r, 100));
+    // Re-check if the loaded model is what we wanted (race condition handling)
+    if (embedder && embedder.modelId === aiModelId) return embedder;
+  }
+
+  try {
+    modelLoading = true;
+    logDebug(`📥 Uplink Action: Loading Model "${aiModelId}"...`);
+    broadcastLog("SYSTEM", `Loading Model "${aiModelId}"...`);
+
+    // Dispose previous model if exists
+    if (embedder) {
+      logDebug("Disposing previous model...");
+      // Transformers.js pipelines don't have a distinct 'dispose' method yet, 
+      // but dereferencing allows GC to do its job. 
+      // We can explicitly clear the cache if requested via clear_model_cache.
+      embedder = null;
+    }
+
+    logDebug("SYSTEM: Starting pipeline()...");
+    broadcastLog("SYSTEM", "Starting pipeline()...");
+
+    // Explicitly disabling local files just in case
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+
+    // Custom Hub Configuration
+    if (customHubUrl) {
+      logDebug(`Using Custom Hub: ${customHubUrl}`);
+      env.remoteHost = customHubUrl;
+      env.remotePathTemplate = '{model}/'; // Simplified template
+    } else {
+      // Reset to defaults if no custom hub
+      // Transformers.js defaults aren't easily "reset" without page reload 
+      // if we polluted the env, so we set them back to standard HF.
+      env.remoteHost = 'https://huggingface.co/';
+      env.remotePathTemplate = '{model}/resolve/{revision}/';
+    }
+
+    embedder = await pipeline('feature-extraction', aiModelId);
+    // Tag the embedder with the ID so we know what's loaded
+    embedder.modelId = aiModelId;
+
+    logDebug("✅ Uplink Action: AI Model Loaded");
+    broadcastLog("SYSTEM", "✅ Uplink Action: AI Model Loaded");
+    return embedder;
+  } catch (e) {
+    console.error("❌ Uplink Error: Failed to load model", e);
+    logDebug("ERROR: Failed to load model: " + e.toString());
+    broadcastLog("ERROR", "Failed to load model: " + e.toString());
+    lastError = e.toString();
+    throw e;
+  } finally {
+    modelLoading = false;
+    logDebug("Finally block reached. Loading=false");
+  }
+}
+
+// --- MESSAGE HANDLER (Content -> Background) ---
+api.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'semantic_search') {
+    (async () => {
+      try {
+        const pipe = await loadModel();
+        console.log(`🔍 SemSearch: Query="${request.query}" Candidates=${request.candidates.length}`);
+
+        // 1. Embed Query
+        const queryEmbedding = await pipe(request.query, { pooling: 'mean', normalize: true });
+
+        // 2. Embed Candidates (Batch Optimized)
+        const texts = request.candidates.map(c => c.text);
+        if (texts.length === 0) {
+          console.log("⚠️ No candidates to embed.");
+          sendResponse(null);
+          return;
+        }
+
+        // 2. Embed Candidates (Concurrent Promise.all)
+        // Map each text to a separate inference call
+        // This avoids the risk of unknown batch return shapes from the pipeline for now
+        const embeddingPromises = texts.map(text => pipe(text, { pooling: 'mean', normalize: true }));
+        const embeddings = await Promise.all(embeddingPromises);
+
+        // 3. Score
+        const results = [];
+
+        for (let i = 0; i < embeddings.length; i++) {
+          const score = cosineSimilarity(queryEmbedding.data, embeddings[i].data);
+          results.push({ ...request.candidates[i], score: score });
+        }
+
+        // 4. Sort & Log
+        results.sort((a, b) => b.score - a.score);
+        if (results.length > 0) {
+          console.log(`🏆 Top Match: [${results[0].id}] "${results[0].text}" Score=${results[0].score}`);
+        } else {
+          console.log("⚠️ SemSearch: No valid candidates found.");
+        }
+
+        sendResponse(results.length > 0 ? results[0] : null);
+
+      } catch (e) {
+        console.error("Semantic Search Failed", e);
+        sendResponse({ error: e.toString() });
+      }
+    })();
+    return true; // Async response
+  }
+});
+
 const MAX_TYPE_LENGTH = 10000;
 const MAX_SCRIPT_LENGTH = 100000;
 
@@ -21,13 +185,19 @@ const MAX_SCRIPT_LENGTH = 100000;
 const RESTRICTED_PROTOCOLS = ['chrome:', 'edge:', 'about:', 'brave:', 'opera:'];
 
 // Load saved security settings
-api.storage.local.get(['allowLocalFiles', 'allowDataTools', 'userBlocklist', 'panicMode', 'rateLimitMs', 'serverPort'], (result) => {
+// Load saved security settings and AI config
+api.storage.local.get(['allowLocalFiles', 'allowDataTools', 'userBlocklist', 'panicMode', 'rateLimitMs', 'serverPort', 'aiModelId', 'customHubUrl'], (result) => {
   if (result.allowLocalFiles !== undefined) allowLocalFiles = result.allowLocalFiles;
   if (result.allowDataTools !== undefined) allowDataTools = result.allowDataTools;
   if (result.userBlocklist !== undefined) userBlocklist = result.userBlocklist;
   if (result.panicMode !== undefined) panicMode = result.panicMode;
   if (result.rateLimitMs !== undefined) rateLimitMs = result.rateLimitMs;
   if (result.serverPort !== undefined) serverPort = result.serverPort;
+  if (result.aiModelId !== undefined) aiModelId = result.aiModelId;
+  if (result.customHubUrl !== undefined) customHubUrl = result.customHubUrl;
+
+  // Initial Connection (After settings load)
+  connect();
 });
 
 // Helper: Glob to Regex
@@ -204,7 +374,7 @@ async function checkIsPasswordField(selector) {
   }
 }
 
-chrome.runtime.onConnect.addListener((port) => {
+api.runtime.onConnect.addListener((port) => {
   if (port.name === "dashboard") {
     dashboardPorts.add(port);
 
@@ -269,6 +439,41 @@ chrome.runtime.onConnect.addListener((port) => {
           api.storage.local.set({ userBlocklist: userBlocklist });
           broadcastLog("SYSTEM", `Blocked removed: ${msg.value}`);
           broadcastState();
+        }
+        if (msg.type === "SET_AI_CONFIG") {
+          if (msg.modelId) aiModelId = msg.modelId;
+          customHubUrl = msg.customHubUrl;
+
+          api.storage.local.set({ aiModelId: aiModelId, customHubUrl: customHubUrl });
+          broadcastLog("SYSTEM", `AI Config Updated: ${aiModelId}`);
+
+          // Reload model logic
+          if (embedder) {
+            broadcastLog("SYSTEM", "Reloading AI Model due to config change...");
+            embedder = null;
+            // Trigger load in background
+            loadModel().catch(e => broadcastLog("ERROR", "Reload failed: " + e.message));
+          }
+          broadcastState();
+        }
+        if (msg.type === "CLEAR_AI_CACHE") {
+          (async () => {
+            try {
+              if (self.caches) {
+                const keys = await self.caches.keys();
+                let count = 0;
+                for (const key of keys) {
+                  if (key.includes('transformers')) {
+                    await self.caches.delete(key);
+                    count++;
+                  }
+                }
+                broadcastLog("SYSTEM", `Cache Cleared: Removed ${count} model caches.`);
+              }
+            } catch (e) {
+              broadcastLog("ERROR", "Cache clear failed: " + e.message);
+            }
+          })();
         }
         if (msg.type === "TOGGLE_CONNECTION") {
           if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
@@ -540,7 +745,87 @@ async function handleCommand(command) {
     return;
   }
 
-  if (["click", "type", "highlight", "get_html", "wait_for", "press_key"].includes(command.action)) {
+  // --- DEBUG STATE ---
+  let lastError = null;
+
+  // ...
+
+  if (command.action === "get_status") {
+    api.storage.local.get(['debugLog', 'lastError'], (result) => {
+      socket.send(JSON.stringify({
+        status: "connected",
+        model_loaded: !!embedder,
+        model_loading: modelLoading,
+        model_id: aiModelId,
+        custom_hub: customHubUrl,
+        last_error: lastError || result.lastError,
+        debug_log: debugLog.length > 0 ? debugLog : (result.debugLog || [])
+      }));
+    });
+    return;
+  }
+
+  if (command.action === "set_model_config") {
+    if (command.model_id) aiModelId = command.model_id;
+    if (command.custom_hub !== undefined) customHubUrl = command.custom_hub; // Allow null to reset
+
+    api.storage.local.set({ aiModelId: aiModelId, customHubUrl: customHubUrl });
+
+    // If a model is currently loaded, reload it with the new config
+    if (embedder) {
+      (async () => {
+        try {
+          socket.send(JSON.stringify(`Switching model to ${aiModelId}...`));
+          embedder = null; // Invalidate current
+          await loadModel();
+          socket.send(JSON.stringify(`Model switched to ${aiModelId}`));
+        } catch (e) {
+          socket.send(JSON.stringify({ error: "Model switch failed: " + e.message }));
+        }
+      })();
+    } else {
+      socket.send(JSON.stringify(`Model config saved: ${aiModelId}`));
+    }
+    return;
+  }
+
+  if (command.action === "clear_model_cache") {
+    (async () => {
+      try {
+        // Transformers.js uses the Cache API under 'transformers-cache'
+        if (window.caches) {
+          const keys = await window.caches.keys();
+          for (const key of keys) {
+            if (key.includes('transformers')) {
+              await window.caches.delete(key);
+              console.log("Deleted cache:", key);
+            }
+          }
+          socket.send(JSON.stringify("Model cache cleared."));
+        } else {
+          socket.send(JSON.stringify("Cache API not available in this context."));
+        }
+      } catch (e) {
+        socket.send(JSON.stringify({ error: "Failed to clear cache: " + e.message }));
+      }
+    })();
+    return;
+  }
+
+  if (command.action === "preload_model") {
+    (async () => {
+      try {
+        socket.send(JSON.stringify("Starting Model Preload..."));
+        await loadModel();
+        socket.send(JSON.stringify("Model Preload Complete!"));
+      } catch (e) {
+        socket.send(JSON.stringify("Model Preload Failed: " + e.message));
+      }
+    })();
+    return;
+  }
+
+  if (["click", "type", "highlight", "get_html", "wait_for", "press_key", "semantic_find"].includes(command.action)) {
     try {
       let targetFrameId = 0;
 
@@ -808,4 +1093,5 @@ async function stopRecording(command) {
   api.runtime.onMessage.addListener(dataHandler);
 }
 
-connect();
+// Removed synchronous connect() to prevent race condition.
+// Connection is now triggered inside the storage callback.

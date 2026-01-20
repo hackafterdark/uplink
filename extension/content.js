@@ -61,9 +61,118 @@ window.uplink = {
 
 // --- Semantic DOM Parser ---
 /**
- * Scans the page for interactive elements and text.
  * Returns a simplified text representation for the AI.
  */
+
+// Helper: Is the element actually visible to the user?
+function isVisible(el) {
+  const rect = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  return (
+    style.display !== 'none' &&
+    style.visibility !== 'hidden' &&
+    style.opacity !== '0' &&
+    rect.width > 0 &&
+    rect.height > 0
+  );
+}
+
+// Helper: Extract useful attributes (The "Bot Gold")
+function getContextAttrs(el) {
+  const attrs = [];
+
+  // Input state
+  if (el.tagName === 'INPUT') {
+    const type = el.type;
+    if (type !== 'text') attrs.push(`type="${type}"`);
+    if (el.checked) attrs.push('checked');
+    if (el.value && type !== 'password' && type !== 'hidden') attrs.push(`value="${el.value.slice(0, 20)}"`);
+  }
+
+  // Stable IDs for testing/bots
+  const testId = el.getAttribute('data-testid') || el.getAttribute('data-cy') || el.getAttribute('data-action');
+  if (testId) attrs.push(`test-id="${testId}"`);
+
+  // ARIA role if specific
+  const role = el.getAttribute('role');
+  if (role && role !== el.tagName.toLowerCase()) attrs.push(`role="${role}"`);
+
+  return attrs.length > 0 ? ` (${attrs.join(' ')})` : '';
+}
+
+// Helper: Robust text extraction that respects 'inert' and 'aria-hidden'
+function getVisibleText(el) {
+  if (!el) return '';
+
+  // 1. Skip if hidden by common visibility signals
+  if (el.nodeType === Node.ELEMENT_NODE) {
+    if (el.hasAttribute('inert') ||
+      el.getAttribute('aria-hidden') === 'true' ||
+      el.hasAttribute('hidden')) {
+      return '';
+    }
+
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return '';
+    }
+  }
+
+  // 2. Return text if it's a text node
+  if (el.nodeType === Node.TEXT_NODE) {
+    return el.textContent;
+  }
+
+  // 3. Recurse into children
+  return Array.from(el.childNodes)
+    .map(child => getVisibleText(child))
+    .join('')
+    .trim();
+}
+
+// Helper: Get a rich "Virtual Document" label for AI processing
+function getLabel(el) {
+  const parts = [];
+
+  // 1. Visible Text (The primary signal)
+  const visible = getVisibleText(el);
+  if (visible) parts.push(visible);
+
+  // 2. Strong Semantic Attributes
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel && ariaLabel !== visible) parts.push(ariaLabel);
+
+  const title = el.getAttribute('title');
+  if (title && title !== visible && title !== ariaLabel) parts.push(title);
+
+  const placeholder = el.getAttribute('placeholder');
+  if (placeholder) parts.push(placeholder);
+
+  // 3. Image Alt Text
+  const imgs = el.querySelectorAll('img');
+  imgs.forEach(img => {
+    if (img.alt && !visible.includes(img.alt)) parts.push(img.alt);
+  });
+
+  // 4. Fallbacks for empty elements
+  if (parts.length === 0) {
+    const testId = el.getAttribute('data-testid') || el.getAttribute('name') || el.id;
+    if (testId) parts.push(testId);
+  }
+
+  // 5. Link Href Context (Last resort or enrichment for generic links)
+  if (el.tagName === 'A') {
+    const href = el.getAttribute('href');
+    // If we have very little text, add the URL slug for context
+    // e.g. <a href="/login">Login</a> -> "Login /login"
+    if (href && (parts.length === 0 || parts.join(' ').length < 10)) {
+      parts.push(href);
+    }
+  }
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 function getPageSnapshot() {
   // Reset state
   window.uplink.map.clear();
@@ -71,72 +180,7 @@ function getPageSnapshot() {
 
   let output = [];
 
-  // Helper: Is the element actually visible to the user?
-  function isVisible(el) {
-    const rect = el.getBoundingClientRect();
-    const style = window.getComputedStyle(el);
-    return (
-      style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      style.opacity !== '0' &&
-      rect.width > 0 &&
-      rect.height > 0
-    );
-  }
 
-  // Helper: Extract useful attributes (The "Bot Gold")
-  function getContextAttrs(el) {
-    const attrs = [];
-
-    // Input state
-    if (el.tagName === 'INPUT') {
-      const type = el.type;
-      if (type !== 'text') attrs.push(`type="${type}"`);
-      if (el.checked) attrs.push('checked');
-      if (el.value && type !== 'password' && type !== 'hidden') attrs.push(`value="${el.value.slice(0, 20)}"`);
-    }
-
-    // Stable IDs for testing/bots
-    const testId = el.getAttribute('data-testid') || el.getAttribute('data-cy') || el.getAttribute('data-action');
-    if (testId) attrs.push(`test-id="${testId}"`);
-
-    // ARIA role if specific
-    const role = el.getAttribute('role');
-    if (role && role !== el.tagName.toLowerCase()) attrs.push(`role="${role}"`);
-
-    return attrs.length > 0 ? ` (${attrs.join(' ')})` : '';
-  }
-
-  // Helper: Get a meaningful label for the element
-  function getLabel(el) {
-    let label = el.getAttribute('aria-label') || el.innerText || '';
-
-    // If empty, look deeper
-    if (!label.trim()) {
-      // 1. Check for images with alt text inside
-      const img = el.querySelector('img');
-      if (img && img.alt) {
-        label = `[IMG: ${img.alt}]`;
-      }
-      // 2. Standard attributes
-      else {
-        label = el.getAttribute('title') ||
-          el.getAttribute('placeholder') ||
-          el.getAttribute('data-testid') ||
-          el.getAttribute('name') ||
-          el.id ||
-          '';
-      }
-    }
-
-    // If still empty and it's a link, use truncated href
-    if (!label.trim() && el.tagName === 'A') {
-      const href = el.getAttribute('href');
-      if (href) label = `[Link: ${href.slice(0, 30)}...]`;
-    }
-
-    return label.replace(/\s+/g, ' ').trim().slice(0, 100);
-  }
 
   // Recursive function to walk DOM and Shadow DOM
   function processNode(root) {
@@ -167,13 +211,10 @@ function getPageSnapshot() {
 
       // 2. Capture Important Text (Context)
       if (!isInteractive && ['h1', 'h2', 'h3', 'p', 'li', 'span', 'div'].includes(tag)) {
-        const directText = Array.from(node.childNodes)
-          .filter(n => n.nodeType === Node.TEXT_NODE)
-          .map(n => n.textContent.trim())
-          .join(' ');
+        const text = getVisibleText(node).replace(/\s+/g, ' ').trim();
 
-        if (directText.length > 3) {
-          output.push(`    ${directText}`);
+        if (text.length > 3) {
+          output.push(`    ${text}`);
         }
       }
 
@@ -258,9 +299,70 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
+
+    // --- SEMANTIC SEARCH (Pre-Resolution) ---
+    if (request.action === 'semantic_find') {
+      const api = (typeof chrome !== "undefined") ? chrome : browser;
+
+      // 1. Gather all candidates
+      const candidates = [];
+      for (const [id, node] of window.uplink.map.entries()) {
+        const label = getLabel(node);
+        if (label && label.length > 2) {
+          const context = getContextAttrs(node);
+          candidates.push({
+            id: id,
+            text: `${label} ${context}`.trim()
+          });
+        }
+      }
+
+      if (candidates.length === 0) {
+        getPageSnapshot();
+        for (const [id, node] of window.uplink.map.entries()) {
+          const label = getLabel(node);
+          if (label && label.length > 2) {
+            const context = getContextAttrs(node);
+            candidates.push({ id: id, text: `${label} ${context}`.trim() });
+          }
+        }
+      }
+
+      // 2. Offload to Background AI
+      (async () => {
+        const bestMatch = await api.runtime.sendMessage({
+          action: 'semantic_search',
+          query: request.query,
+          candidates: candidates
+        });
+
+        // 3. Handle Result
+        if (bestMatch && bestMatch.score > 0.3) {
+          const matchEl = window.uplink.map.get(bestMatch.id);
+          if (matchEl) {
+            matchEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            const rect = matchEl.getBoundingClientRect();
+            createOverlay(rect, `Found: ${bestMatch.score.toFixed(2)}`);
+            respond(`Found [${bestMatch.id}] "${bestMatch.text}" (Confidence: ${bestMatch.score.toFixed(2)})`);
+          } else {
+            respond({ error: "Match found but element reference lost." });
+          }
+        } else {
+          const debugMsg = bestMatch
+            ? `Top match: "${bestMatch.text}" (Score: ${bestMatch.score.toFixed(4)})`
+            : "No candidates returned by AI.";
+          respond({ error: `No element found > 0.3. ${debugMsg}` });
+        }
+      })();
+
+      return true; // Async wait
+    }
+
     // --- RESOLVE ELEMENT (ID vs Selector) ---
     // Universal element resolution for all interaction tools
     let el = null;
+
+
     const selector = request.selector;
 
     // Check if selector is a numeric ID (e.g., "42")
@@ -413,6 +515,8 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
     else if (request.action === 'get_html') {
       respond(el.outerHTML);
     }
+
+
 
   } catch (e) {
     respond({ error: e.toString() });

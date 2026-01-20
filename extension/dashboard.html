@@ -238,6 +238,37 @@
       </div>
   </section>
 
+  <section id="ai-panel" class="card">
+      <h3 style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">AI Model Configuration</h3>
+      
+      <!-- Model Dropdown -->
+      <div class="control-group" style="margin-bottom: 10px;">
+          <label class="control-label" style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Embedding Model</label>
+          <select id="modelSelect" style="width:100%; padding: 6px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: var(--text-main); font-size: 12px;">
+              <option value="Xenova/all-MiniLM-L6-v2">all-MiniLM-L6-v2 (Fast, 80MB)</option>
+              <option value="Xenova/bge-small-en-v1.5">bge-small-en-v1.5 (Accurate, 130MB)</option>
+              <option value="Xenova/paraphrase-MiniLM-L3-v2">paraphrase-MiniLM-L3-v2 (Tiny, 45MB)</option>
+              <option value="custom">Custom (Specify ID below)</option>
+          </select>
+          <input type="text" id="customModelIdInput" placeholder="e.g. org/model-name" style="width:100%; margin-top:5px; padding: 6px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: var(--text-main); font-size: 12px; display:none;">
+      </div>
+
+      <!-- Custom Hub URL -->
+      <div class="control-group" style="margin-bottom: 10px;">
+          <label class="control-label" style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">Custom Hub URL (Optional)</label>
+          <input type="text" id="customHubInput" placeholder="Default: Hugging Face" style="width:100%; padding: 6px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: var(--text-main); font-size: 12px;">
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; gap: 8px;">
+          <button id="saveModelBtn" style="flex:1; padding: 6px; cursor: pointer; background: var(--accent); color: white; border: none; border-radius: 6px; font-size: 12px;">Update Model</button>
+          <button id="clearCacheBtn" style="flex:1; padding: 6px; cursor: pointer; background: #475569; color: white; border: none; border-radius: 6px; font-size: 12px;">Clear Cache</button>
+      </div>
+      <div style="font-size:10px; color:#64748b; margin-top:8px; text-align:center;">
+          Changing models triggers a download.
+      </div>
+  </section>
+
   <footer>
     Uplink v1.0 • Secure Token Active 🔒
   </footer>

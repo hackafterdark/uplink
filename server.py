@@ -191,8 +191,21 @@ async def send_command(command: dict) -> str:
             
             # Wait for response with a timeout to prevent deadlocks
             try:
-                response = await asyncio.wait_for(browser_socket.recv(), timeout=30.0)
+                response = await asyncio.wait_for(browser_socket.recv(), timeout=60.0)
                 logging.info(f"Received response: {response[:100]}...")
+                
+                # Handle debug messages from extension
+                try:
+                    data = json.loads(response)
+                    if isinstance(data, dict) and "debug" in data:
+                        logging.info(f"EXTENSION DEBUG: {data['debug']}")
+                        # Keep waiting for the real response? 
+                        # This is complex with a single recv(). 
+                        # For now, just return it and let the tool handle (or fail).
+                        return response 
+                except:
+                    pass
+                    
                 return response
             except asyncio.TimeoutError:
                 logging.error("Timeout waiting for browser response")
@@ -264,6 +277,24 @@ async def press_key(key: str, selector: str = None) -> str:
         "key": key,
         "selector": selector
     })
+
+@mcp.tool()
+async def semantic_find(query: str) -> str:
+    """Finds an element using natural language search (Tiny AI).
+    Useful when you know WHAT you want (e.g. "Login button") but not the ID.
+    Returns the numeric ID of the best match.
+    """
+    return await send_command({
+        "action": "semantic_find",
+        "query": query
+    })
+
+
+
+@mcp.tool()
+async def get_extension_status() -> str:
+    """Checks the status of the extension and AI model."""
+    return await send_command({"action": "get_status"})
 
 @mcp.tool()
 async def hover_element(selector: str) -> str:

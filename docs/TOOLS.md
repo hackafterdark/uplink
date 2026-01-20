@@ -29,8 +29,8 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
-| `read_page` | Returns the page content. Default format is 'distilled' (ID-mapped). | `format` (str, optional: 'distilled' (default), 'text', 'html') |
-| `read_as_markdown` | Converts the active page's HTML content to Markdown. Optimized for LLMs. | None |
+| `read_page` | Returns the page content. Default format is 'distilled' (ID-mapped), which is **anti-scraping resilient** (respects `inert`, `aria-hidden`). | `format` (str, optional: 'distilled' (default), 'text', 'html') |
+| `read_as_markdown` | Converts the active page's HTML content to Markdown. Optimized for LLMs and RAG. | None |
 | `get_html` | Returns the outerHTML of an element. Useful for inspecting attributes. | `selector` (str) |
 | `get_page_metadata` | Returns metadata for the active page (title, description, image, etc). | None |
 | `get_console_logs` | Retrieves captured console logs from the browser extension. | None |
@@ -55,3 +55,12 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `screenshot` | Takes a screenshot of the active tab. | `save_path` (str, optional) |
 | `start_recording` | Starts video recording of the active tab. (Supported: Chrome, Edge, Brave) | None |
 | `stop_recording` | Stops the video recording and saves it. (Supported: Chrome, Edge, Brave) | `save_path` (str, optional) |
+
+## AI & Semantic Features
+
+| Tool Name | Description | Arguments |
+| :--- | :--- | :--- |
+| `semantic_find` | Finds elements using natural language search. Powered by **Virtual Document** signal enrichment (combines text, aria, title, href). | `query` (str) |
+| `set_model_config` | Configures the AI model used for semantic search. Supports presets or custom Hugging Face model IDs. | `model_id` (str, optional), `custom_hub` (str, optional) |
+| `clear_model_cache` | Clears the local browser cache of downloaded AI models. Useful for low disk space or corrupted downloads. | None |
+| `get_extension_status` | Returns the current status of the extension, including AI model state, active errors, and debug logs. | None |
