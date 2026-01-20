@@ -67,7 +67,7 @@ async def handler(websocket):
 
     logging.info(f"New connection from {websocket.remote_address}")
     async with socket_lock:
-        if browser_socket is not None and browser_socket.open:
+        if browser_socket is not None:
             logging.info("Closing existing connection to accept new one...")
             try:
                 # Add timeout to prevent hanging if the client is unresponsive
