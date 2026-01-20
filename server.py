@@ -77,7 +77,7 @@ async def handler(websocket):
             except Exception as e:
                 logging.error(f"Error closing old connection: {e}")
         browser_socket = websocket
-    logging.info("🌍 Browser Connected!")
+    logging.info(f"🌍 Browser Connected! PID: {os.getpid()}")
     try:
         await websocket.wait_closed()
     except Exception as e:
@@ -180,7 +180,7 @@ async def send_command(command: dict) -> str:
     """Sends a JSON command to the browser and waits for a response."""
     global browser_socket
     if not browser_socket:
-        logging.error("Attempted command but browser_socket is None")
+        logging.error(f"Attempted command but browser_socket is None. PID: {os.getpid()}")
         return "Error: Browser not connected. Please install the extension and reload the page."
     
     async with socket_lock:
