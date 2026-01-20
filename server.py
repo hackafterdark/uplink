@@ -547,5 +547,75 @@ async def stop_recording(save_path: str = None) -> str:
     except Exception as e:
         return f"Error saving recording: {str(e)}"
 
+
+@mcp.tool()
+async def get_page_performance():
+    """
+    Returns performance metrics for the current page.
+    Includes:
+    - Navigation Timing (TTFB, Load Time)
+    - Paint Timing (First Contentful Paint)
+    - Slow Resources (Top 5 bottlenecks)
+    - Recent Interaction Timings (Click/Type duration)
+    """
+    raw_response = await send_command({"action": "get_performance_metrics"})
+    
+    try:
+        result = json.loads(raw_response)
+    except:
+        return f"Error parsing response: {raw_response}"
+
+    if "error" in result:
+        return f"Error getting performance metrics: {result['error']}"
+    
+    # Format the report
+    nav = result.get('navigation', {})
+    fcp = result.get('fcp', 0)
+    slow = result.get('slowResources', [])
+    last = result.get('lastInteraction', {})
+    long_tasks = result.get('longTaskCount', 0)
+
+    report = [
+        "## Page Performance Report",
+        f"- **TTFB (Backend)**: {nav.get('ttfb', 0)}ms",
+        f"- **FCP (Visual)**: {fcp}ms",
+        f"- **Page Load**: {nav.get('pageLoad', 0)}ms",
+        f"- **DOM Processing**: {nav.get('domProcessing', 0)}ms",
+        "",
+        "### Recent Interaction",
+        f"- **Last Action**: {last.get('type', 'None')}",
+        f"- **Duration**: {last.get('duration', 0)}ms",
+        f"- **Long Tasks (10s)**: {long_tasks}",
+        "",
+        "### Top Slow Resources (>500ms)"
+    ]
+
+    if not slow:
+        report.append("- (None)")
+    else:
+        for r in slow:
+            report.append(f"- [{r.get('type')}] {r.get('name')} ({r.get('duration')}ms)")
+
+    return "\n".join(report)
+
+@mcp.tool()
+async def check_errors() -> str:
+    """Analyzes browser console errors and network failures from the active page.
+    Returns a clustered summary of issues, intelligently grouping similar errors to reduce noise.
+    Useful for diagnosing broken pages or failed actions."""
+    return await send_command({"action": "check_errors"})
+
+@mcp.tool()
+async def manage_session(action: str = "clear") -> str:
+    """Manages the browser session state (cookies, local storage, logs).
+    ARGUMENTS:
+        action: 'clear' (default) - Clears all storage, cookies, and error logs.
+        action: 'clear_logs' - Clears only the error logs.
+    """
+    return await send_command({
+        "action": "manage_session",
+        "command": action
+    })
+
 if __name__ == "__main__":
     mcp.run()

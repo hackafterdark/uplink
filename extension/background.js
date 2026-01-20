@@ -1001,6 +1001,47 @@ async function handleCommand(command) {
     return;
   }
 
+  if (command.action === 'check_errors') {
+    try {
+      const tabs = await api.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length === 0) {
+        socket.send(JSON.stringify("No active tab to check errors."));
+        return;
+      }
+
+      // Get raw logs from content script
+      const logs = await api.tabs.sendMessage(tabs[0].id, { action: 'check_errors' });
+
+      // Intelligent Process
+      const report = await clusterLogs(logs);
+
+      socket.send(JSON.stringify(report));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: "Check Errors failed: " + err.message }));
+    }
+    return;
+  }
+
+  if (command.action === 'manage_session') {
+    try {
+      const tabs = await api.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length === 0) {
+        socket.send(JSON.stringify({ error: "No active tab" }));
+        return;
+      }
+
+      const response = await api.tabs.sendMessage(tabs[0].id, {
+        action: 'manage_session',
+        command: command.command || 'clear'
+      });
+
+      socket.send(JSON.stringify(response));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: "Session Management failed: " + err.message }));
+    }
+    return;
+  }
+
   if (command.action === "get_metadata") {
     try {
       const results = await api.scripting.executeScript({
@@ -1091,6 +1132,83 @@ async function stopRecording(command) {
     }
   };
   api.runtime.onMessage.addListener(dataHandler);
+}
+
+// --- Log Intelligence Helpers ---
+// function cosineSimilarity(a, b) { ... } // Use existing global helper
+
+async function clusterLogs(logs) {
+  if (!logs || logs.length === 0) return "No errors detected.";
+
+  // 1. Fingerprinting (Exact Deduplication)
+  const fingerprints = new Map();
+  for (const log of logs) {
+    const stackTop = log.stack ? log.stack.split('\n')[0] : '';
+    const key = `${log.msg}|${stackTop}`;
+    if (!fingerprints.has(key)) {
+      fingerprints.set(key, { ...log, count: 0 });
+    }
+    fingerprints.get(key).count++;
+  }
+
+  const uniqueErrors = Array.from(fingerprints.values());
+  logDebug(`Log Intelligence: Condensed ${logs.length} logs to ${uniqueErrors.length} unique fingerprints.`);
+
+  // 2. Semantic Clustering (if model available)
+  let clusters = [];
+  try {
+    const pipe = await loadModel();
+    // Embed messages only
+    const embeddings = await Promise.all(
+      uniqueErrors.map(e => pipe(e.msg, { pooling: 'mean', normalize: true }))
+    );
+
+    const visited = new Set();
+    const threshold = 0.85;
+
+    for (let i = 0; i < uniqueErrors.length; i++) {
+      if (visited.has(i)) continue;
+
+      const cluster = [uniqueErrors[i]];
+      visited.add(i);
+
+      for (let j = i + 1; j < uniqueErrors.length; j++) {
+        if (visited.has(j)) continue;
+        const score = cosineSimilarity(embeddings[i].data, embeddings[j].data);
+        if (score > threshold) {
+          cluster.push(uniqueErrors[j]);
+          visited.add(j);
+        }
+      }
+      clusters.push(cluster);
+    }
+  } catch (e) {
+    console.warn("Log Intelligence: AI Clustering failed, falling back to fingerprints.", e);
+    // Fallback: Each fingerprint is a cluster
+    clusters = uniqueErrors.map(e => [e]);
+  }
+
+  // 3. Summarization
+  let report = `Found ${logs.length} errors/warnings (condensed into ${clusters.length} clusters):\n`;
+
+  clusters.forEach((cluster, idx) => {
+    const totalCount = cluster.reduce((sum, e) => sum + e.count, 0);
+    const primary = cluster[0]; // Representative
+    report += `\n[Cluster ${idx + 1}] (${totalCount} occurrences)\n`;
+    report += `Type: ${primary.type}\n`;
+    report += `Message: "${primary.msg}"\n`;
+    if (cluster.length > 1) {
+      report += `Variations: ${cluster.length - 1} other similar messages merged.\n`;
+    }
+    if (primary.stack) {
+      report += `Stack (Top Frame): ${primary.stack.split('\n')[0]}\n`;
+    }
+    if (primary.url) {
+      report += `Source: ${primary.url}\n`;
+    }
+  });
+
+  return report;
 }
 
 // Removed synchronous connect() to prevent race condition.

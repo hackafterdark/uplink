@@ -15,7 +15,76 @@ try {
 let capturedLogs = [];
 window.addEventListener('mcp-console-log', (e) => {
   capturedLogs.push(e.detail);
+  if (capturedLogs.length > 500) capturedLogs.shift();
 });
+
+// --- Performance Monitor ---
+const PerfMon = {
+  // Store interaction timings
+  lastInteraction: { type: null, duration: 0, timestamp: 0 },
+  longTasks: [], // Store recent long tasks (INP approximation)
+
+  recordInteraction(type, duration) {
+    this.lastInteraction = { type, duration, timestamp: Date.now() };
+  },
+
+  getMetrics() {
+    const p = window.performance;
+    const t = p.timing;
+
+    // 1. Navigation Timing (Legacy but reliable)
+    const nav = {
+      ttfb: t.responseStart - t.requestStart,
+      domProcessing: t.domComplete - t.domInteractive,
+      pageLoad: t.loadEventEnd - t.navigationStart
+    };
+
+    // 2. Paint Timing (FCP)
+    let fcp = 0;
+    try {
+      const paint = p.getEntriesByType('paint');
+      const fcpEntry = paint.find(e => e.name === 'first-contentful-paint');
+      if (fcpEntry) fcp = fcpEntry.startTime;
+    } catch (e) { } // Firefox < 84 or missing support
+
+    // 3. Resource Bottlenecks (Top 5 > 500ms)
+    let slowResources = [];
+    try {
+      slowResources = p.getEntriesByType('resource')
+        .filter(e => e.duration > 500)
+        .sort((a, b) => b.duration - a.duration) // Descending
+        .slice(0, 5)
+        .map(e => ({
+          name: e.name.split('/').pop().split('?')[0] || e.name, // Short name
+          duration: Math.round(e.duration),
+          type: e.initiatorType
+        }));
+    } catch (e) { }
+
+    return {
+      navigation: nav,
+      fcp: Math.round(fcp),
+      slowResources: slowResources,
+      lastInteraction: this.lastInteraction,
+      // Recent long tasks count (last 10s)
+      longTaskCount: this.longTasks.filter(t => Date.now() - t.timestamp < 10000).length
+    };
+  }
+};
+
+// Start Observer for Long Tasks (INP Proxy)
+try {
+  const observer = new PerformanceObserver((list) => {
+    list.getEntries().forEach((entry) => {
+      PerfMon.longTasks.push({ duration: entry.duration, timestamp: Date.now() });
+      if (PerfMon.longTasks.length > 50) PerfMon.longTasks.shift();
+    });
+  });
+  observer.observe({ entryTypes: ['longtask'] });
+} catch (e) {
+  // Graceful degradation: Observer not supported
+}
+
 
 // --- Overlay System ---
 function createOverlay(rect, labelText) {
@@ -299,6 +368,40 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
+    // --- Observability Handlers (Global) ---
+    if (request.action === 'check_errors') {
+      respond(capturedLogs); // Send array
+      return true;
+    }
+
+    if (request.action === 'manage_session') {
+      const action = request.command || 'clear';
+      if (action === 'clear' || action === 'clear_all') {
+        try {
+          window.localStorage.clear();
+          window.sessionStorage.clear();
+          document.cookie.split(";").forEach((c) => {
+            document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+          });
+          capturedLogs = [];
+          respond({ status: "success", message: "Session/Cookies/Logs cleared." });
+        } catch (e) {
+          respond({ status: "error", message: e.toString() });
+        }
+      } else if (action === 'clear_logs') {
+        capturedLogs = [];
+        respond({ status: "success", message: "Logs cleared." });
+      } else {
+        respond({ status: "error", message: "Unknown command" });
+      }
+      return true;
+    }
+
+    if (request.action === 'get_performance_metrics') {
+      respond(PerfMon.getMetrics());
+      return true;
+    }
+
 
     // --- SEMANTIC SEARCH (Pre-Resolution) ---
     if (request.action === 'semantic_find') {
@@ -395,7 +498,8 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (foundEl) {
           foundEl.scrollIntoView({ behavior: "smooth", block: "center" });
           createOverlay(foundEl.getBoundingClientRect(), "Found");
-          respond("Found element");
+          const waitTime = Date.now() - start;
+          respond(`Found element (waited ${waitTime}ms)`);
         } else if (Date.now() - start > timeout) {
           respond({ error: `Timeout waiting for ${request.selector}` });
         } else {
@@ -425,11 +529,13 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       respond("Highlighted");
     }
     else if (request.action === 'click') {
+      const start = performance.now();
       el.click();
-      // Also dispatch generic events for React/Angular apps
       el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-      respond("Clicked");
+      const duration = Math.round(performance.now() - start);
+      PerfMon.recordInteraction('click', duration);
+      respond(`Clicked (Internal: ${duration}ms)`);
     }
     else if (request.action === 'type') {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -441,19 +547,24 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       createOverlay(rect, label);
 
+      const start = performance.now();
       if (el.isContentEditable) {
         el.focus();
         document.execCommand('insertText', false, request.text);
-        respond("Typed (ContentEditable)");
+        const duration = Math.round(performance.now() - start);
+        PerfMon.recordInteraction('type', duration);
+        respond(`Typed (ContentEditable, ${duration}ms)`);
       } else {
         el.value = request.text;
-        // React/Angular often need these
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
-        respond("Typed");
+        const duration = Math.round(performance.now() - start);
+        PerfMon.recordInteraction('type', duration);
+        respond(`Typed (${duration}ms)`);
       }
     }
     else if (request.action === 'press_key') {
+      const start = performance.now();
       const key = request.key;
       // Simple modifier check (not full support yet)
       const options = {
@@ -470,13 +581,16 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       el.dispatchEvent(new KeyboardEvent('keypress', options));
       el.dispatchEvent(new KeyboardEvent('keyup', options));
 
+      const duration = Math.round(performance.now() - start);
+      PerfMon.recordInteraction('press_key', duration);
+
       // If it's an input and we are "typing" a single char, might want input event
       if (key.length === 1 && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
         // This is complex, so for now just rely on raw events or assume type_text is used for typing.
         // press_key is mostly for navigation/submission (Enter, Tab, Esc).
       }
 
-      respond(`Pressed ${key}`);
+      respond(`Pressed ${key} (${duration}ms)`);
     }
     else if (request.action === 'hover') {
       el.scrollIntoView({ behavior: "smooth", block: "center" });

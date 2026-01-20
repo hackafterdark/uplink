@@ -15,6 +15,9 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 
 ## Interaction
 
+> [!NOTE]
+> All interaction tools are instrumented to return execution duration (e.g., `"Clicked (Internal: 45ms)"`) to help diagnose UI freezes.
+
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
 | `click_element` | Clicks an element. Supports Numeric IDs (e.g., "1") from `read_page` or CSS selectors. | `selector` (str), `purpose` (str, optional) |
@@ -22,7 +25,7 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `press_key` | Presses a key on the page or specific element. | `key` (str), `selector` (str, optional) |
 | `hover_element` | Hovers over an element. Supports Numeric IDs or CSS selectors. | `selector` (str) |
 | `select_option` | Selects an option in a `<select>` element. Supports Numeric IDs or CSS selectors. | `selector` (str), `value` (str) |
-| `wait_for_element` | Waits for an element to appear (Numeric ID or CSS selector). Essential for React/SPA apps. | `selector` (str), `timeout` (int, default 15000) |
+| `wait_for_element` | Waits for an element to appear (Numeric ID or CSS selector). Essential for React/SPA apps. Returns wait duration. | `selector` (str), `timeout` (int, default 15000) |
 | `execute_script` | Executes arbitrary JavaScript in the active tab context. Returns the result. | `script` (str) |
 
 ## Data Extraction
@@ -33,7 +36,6 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `read_as_markdown` | Converts the active page's HTML content to Markdown. Optimized for LLMs and RAG. | None |
 | `get_html` | Returns the outerHTML of an element. Useful for inspecting attributes. | `selector` (str) |
 | `get_page_metadata` | Returns metadata for the active page (title, description, image, etc). | None |
-| `get_console_logs` | Retrieves captured console logs from the browser extension. | None |
 
 ## Storage & Cookies
 
@@ -64,3 +66,13 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `set_model_config` | Configures the AI model used for semantic search. Supports presets or custom Hugging Face model IDs. | `model_id` (str, optional), `custom_hub` (str, optional) |
 | `clear_model_cache` | Clears the local browser cache of downloaded AI models. Useful for low disk space or corrupted downloads. | None |
 | `get_extension_status` | Returns the current status of the extension, including AI model state, active errors, and debug logs. | None |
+
+## Performance & Observability
+
+| Tool Name | Description | Arguments |
+| :--- | :--- | :--- |
+| `check_errors` | Analyzes browser console errors and network failures. Returns a **semantically clustered** summary of issues. | None |
+| `manage_session` | Clears browser session state (cookies, local storage) and captured logs. | `action` (str, optional: 'clear' (default), 'clear_logs') |
+| `get_page_performance` | Returns a holistic performance report: TTFB, FCP, Page Load, and **Interaction Timings**. | None |
+| `get_console_logs` | Retrieves raw captured console logs from the browser extension. Moved here from Data Extraction. | None |
+
