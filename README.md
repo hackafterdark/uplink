@@ -30,27 +30,15 @@ It consists of two parts:
 *   **Cross-Platform**: Works on Windows, macOS, and Linux.
 
 ## 🛠️ Installation
-(For End Users)
 
-### 1. Start the MCP Server
-You need Python 3.10+ installed.
+### 1. Setup the MCP Server
+You only need **Python 3.10+** installed. The provided startup scripts handle everything else (creating a virtual environment and installing dependencies) automatically the first time they run.
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the server
-# Windows:
-./start_server.bat
-
-# macOS / Linux:
-./start_server.sh
-```
-
-The server will start on `ws://127.0.0.1:8765`.
+> [!NOTE]
+> You typically **do not need to run these scripts manually**. MCP-compatible applications (like Antigravity, Claude Desktop, Cursor, or Roo Code) will execute them for you based on your configuration.
 
 ### 2. Install the Extension
-We provide pre-built versions for Chrome and Firefox to handle their different manifest requirements (Service Workers vs. Event Pages).
+We provide pre-built versions for Chrome and Firefox in the `dist/` directory to handle their different manifest requirements (Service Workers vs. Event Pages).
 
 d.  **Chrome / Edge / Brave**:
     1.  Navigate to `chrome://extensions`.
@@ -64,7 +52,9 @@ e.  **Firefox / LibreWolf**:
     3.  Select any file inside the `dist/firefox` folder.
 
 ### 3. Connect your AI
-Add the MCP server to your AI agent configuration (e.g., Claude Desktop config or custom MCP client).
+Add the MCP server to your AI agent configuration (e.g., Claude Desktop config, Cursor, or Roo Code).
+
+**Important**: The agent uses the `command` field to automatically launch the server and install dependencies. You do not need to run the scripts yourself.
 
 **Basic Configuration (Default Port 8765):**
 *(Windows)*
@@ -72,7 +62,7 @@ Add the MCP server to your AI agent configuration (e.g., Claude Desktop config o
 {
   "mcpServers": {
     "uplink": {
-      "command": "f:/browser-tool/start_server.bat",
+      "command": "C:/path/to/uplink/start_server.bat",
       "args": []
     }
   }
@@ -83,7 +73,7 @@ Add the MCP server to your AI agent configuration (e.g., Claude Desktop config o
 {
   "mcpServers": {
     "uplink": {
-      "command": "/path/to/browser-tool/start_server.sh",
+      "command": "/path/to/uplink/start_server.sh",
       "args": []
     }
   }
@@ -97,14 +87,13 @@ If you need to run multiple instances or avoid port conflicts, pass the `--port`
 {
   "mcpServers": {
     "uplink-secondary": {
-      "command": "f:/browser-tool/start_server.bat",
+      "command": "C:/path/to/uplink/start_server.bat",
       "args": ["--port", "8766"]
     }
   }
 }
 ```
 *Note: If you change the server port, remember to update the **Server Port** setting in the Browser Extension Dashboard to match.*
-*Note on Scripts: The provided `start_server` scripts are designed to simply launch the Python process. For multi-agent setups, we disabled the auto-kill feature so multiple instances can run side-by-side.*
 
 ## 🛡️ Security
 
@@ -126,21 +115,22 @@ Click the extension icon to open the **Uplink Control** dashboard.
 ## 👥 Multi-Agent & Advanced Config
 
 ### Custom Port (Run Multiple Agents)
-You can run multiple instances of the server on different ports to power multiple agents simultaneously.
+To run multiple independent agents, you can specify different ports in your MCP configuration:
 
-```bash
-# Start server on port 8766
-python server.py --port 8766
+```json
+"uplink-researcher": {
+  "command": "path/to/start_server.sh",
+  "args": ["--port", "8766"]
+}
 ```
 
-Then in the **Extension Dashboard**, enter `8766` in the Port field to connect the specific browser window to that agent.
+Then, in the **Extension Dashboard** of the browser instance you want that agent to control, enter `8766` in the **Server Port** field.
 
 ### Custom Download Directory
-Keep your focused workspace clean by directing all media (screenshots, recordings) to a specific folder.
+You can redirect all media (screenshots, recordings) to a specific folder by adding the `--downloads` argument to your configuration:
 
-```bash
-# Save files to ./media/
-python server.py --downloads "./media"
+```json
+"args": ["--downloads", "/your/custom/path"]
 ```
 *Note: The tool returns clickable `file:///` links for easy access.*
 
@@ -188,3 +178,39 @@ To avoid maintaining two separate codebases, we use a build script to generate t
     *   `dist/chrome` (Service Worker manifest)
     *   `dist/firefox` (Event Page manifest)
 4.  Reload the extension in your browser to see changes.
+
+## 🔍 Troubleshooting
+
+Having trouble connecting? Follow these steps:
+
+### 1. Check the Server Logs
+The Python server logs everything to a file sitting next to `server.py`:
+*   **File**: `server.log` (located in the same directory as the server)
+*   **What to look for**: Check for `🌍 Browser Connected!` or `❌ Browser Disconnected`. If you see errors related to `AttributeError` or `websockets`, try updating your dependencies (`pip install -r requirements.txt`).
+
+### 2. Check the Browser Logs
+The extension has its own logs which can reveal communication or CSP issues:
+1.  Open Chrome Extensions (`chrome://extensions`) or Firefox Debugging (`about:debugging`).
+2.  Click on **Service Worker** (Chrome) or **Inspect** (Firefox) for the Uplink extension.
+3.  Look for "Connected to MCP Server" or red error messages in the console.
+
+### 3. Check for Port Conflicts
+Only one server can listen on a port at a time. If the server fails to start, check if another instance is already running:
+
+*   **Windows**:
+    ```powershell
+    netstat -ano | findstr :8765
+    ```
+*   **Linux / macOS**:
+    ```bash
+    lsof -i :8765
+    ```
+If a process is found, kill it or use a different port (e.g., `--port 8767`).
+
+### 4. Common Fixes
+*   **"Browser not connected"**: Ensure the extension dashboard shows a green "Connected" status. If it's red, check that the port in the dashboard matches your server's `--port`. 
+*   **"Secure Token Active"**: If you manually edited `AUTH_TOKEN` in `server.py`, ensure the extension is also updated or reloaded.
+
+---
+## 📜 License
+MIT License - See [LICENSE](LICENSE) for details.
