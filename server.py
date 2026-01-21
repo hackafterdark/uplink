@@ -667,6 +667,8 @@ async def audit_accessibility() -> str:
 
     report.append(f"Summary: {result.get('passesCount', 0)} checks passed, {result.get('incompleteCount', 0)} checks need manual review.")
     return "\n".join(report)
+def main():
+    mcp.run()
 
 if __name__ == "__main__":
-    mcp.run()
+    main()

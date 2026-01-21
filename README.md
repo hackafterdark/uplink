@@ -31,27 +31,34 @@ It consists of two parts:
 
 ## 🛠️ Installation
 
-### 1. Setup the MCP Server
+### 1. Download the Code
+For now, until there is a stable release published, you need to download the source code:
+*   **Clone the repository**: `git clone https://github.com/hackafterdark/uplink.git`
+*   **Or**: Download the [latest ZIP](https://github.com/hackafterdark/uplink/archive/refs/heads/main.zip) and extract it.
+
+Put this code in a directory of your choice, but remember where you put it because you'll need to configure your AI agent to point to the correct path.
+
+### 2. Setup the MCP Server
 You only need **Python 3.10+** installed. The provided startup scripts handle everything else (creating a virtual environment and installing dependencies) automatically the first time they run.
 
 > [!NOTE]
 > You typically **do not need to run these scripts manually**. MCP-compatible applications (like Antigravity, Claude Desktop, Cursor, or Roo Code) will execute them for you based on your configuration.
 
-### 2. Install the Extension
-We provide pre-built versions for Chrome and Firefox in the `dist/` directory to handle their different manifest requirements (Service Workers vs. Event Pages).
+### 3. Install the Extension
+Pre-built versions for Chrome and Firefox are available in the `dist/` directory to handle their different manifest requirements (Service Workers vs. Event Pages).
 
-d.  **Chrome / Edge / Brave**:
-    1.  Navigate to `chrome://extensions`.
-    2.  Enable **Developer Mode**.
-    3.  Click **Load Unpacked**.
-    4.  Select the `dist/chrome` folder.
+**Chrome / Edge / Brave**:
+  1.  Navigate to `chrome://extensions`.
+  2.  Enable **Developer Mode**.
+  3.  Click **Load Unpacked**.
+  4.  Select the `dist/chrome` folder.
 
-e.  **Firefox / LibreWolf**:
-    1.  Navigate to `about:debugging#/runtime/this-firefox`.
-    2.  Click **Load Temporary Add-on...**.
-    3.  Select any file inside the `dist/firefox` folder.
+**Firefox / LibreWolf**:
+  1.  Navigate to `about:debugging#/runtime/this-firefox`.
+  2.  Click **Load Temporary Add-on...**.
+  3.  Select any file inside the `dist/firefox` folder.
 
-### 3. Connect your AI
+### 4. Connect your AI
 Add the MCP server to your AI agent configuration (e.g., Claude Desktop config, Cursor, or Roo Code).
 
 **Important**: The agent uses the `command` field to automatically launch the server and install dependencies. You do not need to run the scripts yourself.
@@ -133,16 +140,6 @@ You can redirect all media (screenshots, recordings) to a specific folder by add
 "args": ["--downloads", "/your/custom/path"]
 ```
 *Note: The tool returns clickable `file:///` links for easy access.*
-
-## 🎥 Video Recording
-*   **Supported Browsers**: Chrome, Edge, Brave (Chromium-based).
-*   **Unsupported**: Firefox, LibreWolf (Due to missing `offscreen` API).
-*   **Usage**: The `start_recording` tool captures the active tab's video and audio.
-
-## ✍️ Rich Text Support
-Uplink includes a smart typing tool that handles:
-*   **Standard Forms**: `<input>`, `<textarea>`.
-*   **Rich Text Editors**: `contenteditable` divs (e.g., **X.com**, **Notion**), simulating real keystrokes.
 
 ## 🌐 Multi-Browser Support
 
