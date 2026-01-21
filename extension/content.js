@@ -332,59 +332,75 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Helper to resolve the promise safely
   const respond = (data) => sendResponse(data);
 
-  try {
-    // --- ACTION: READ ---
-    if (request.action === 'read') {
-      const format = request.format || 'distilled'; // Default to new parser
+  // --- ASYNC HANDLER WRAPPER ---
+  (async () => {
+    try {
+      // Helper: Wait for Page Load (Readiness)
+      const waitForReadiness = async () => {
+        if (document.readyState === 'complete') return;
 
-      if (format === 'html') {
-        respond(document.documentElement.outerHTML);
-      } else if (format === 'text') {
-        respond(document.body.innerText.substring(0, 10000));
-      } else {
-        // Default: Distilled
-        let snapshot = getPageSnapshot();
-        if (!snapshot.trim()) {
-          // Retry logic for hydrating pages
-          setTimeout(() => {
+        return new Promise(resolve => {
+          const timeout = setTimeout(() => {
+            resolve();
+          }, 5000); // Max wait 5s
+
+          window.addEventListener('load', () => {
+            clearTimeout(timeout);
+            resolve();
+          }, { once: true });
+        });
+      };
+
+      // --- ACTION: READ ---
+      if (request.action === 'read') {
+        await waitForReadiness();
+
+        const format = request.format || 'distilled';
+
+        if (format === 'html') {
+          respond(document.documentElement.outerHTML);
+        } else if (format === 'text') {
+          respond(document.body.innerText.substring(0, 10000));
+        } else {
+          // Default: Distilled
+          let snapshot = getPageSnapshot();
+          if (!snapshot.trim()) {
+            // Retry logic for hydration
+            await new Promise(r => setTimeout(r, 1000));
             snapshot = getPageSnapshot();
-            respond(snapshot);
-          }, 1000);
-          return true; // Async wait
+          }
+          respond(snapshot);
         }
-        respond(snapshot);
+        return;
       }
-      return true;
-    }
 
-    if (request.action === 'get_logs') {
-      respond(JSON.stringify(capturedLogs));
-      capturedLogs = []; // Clear after reading
-      return true;
-    }
+      if (request.action === 'get_logs') {
+        respond(JSON.stringify(capturedLogs));
+        capturedLogs = [];
+        return;
+      }
 
-    if (request.action === 'execute') {
-      const result = eval(request.script);
-      respond(String(result));
-      return true;
-    }
+      if (request.action === 'execute') {
+        const result = eval(request.script);
+        respond(String(result));
+        return;
+      }
 
-    if (request.action === 'read_as_markdown') {
-      const md = htmlToMarkdown(document.body);
-      respond(md);
-      return true;
-    }
+      if (request.action === 'read_as_markdown') {
+        const md = htmlToMarkdown(document.body);
+        respond(md);
+        return;
+      }
 
-    // --- Observability Handlers (Global) ---
-    if (request.action === 'check_errors') {
-      respond(capturedLogs); // Send array
-      return true;
-    }
+      // --- Observability Handlers (Global) ---
+      if (request.action === 'check_errors') {
+        respond(capturedLogs);
+        return;
+      }
 
-    if (request.action === 'manage_session') {
-      const action = request.command || 'clear';
-      if (action === 'clear' || action === 'clear_all') {
-        try {
+      if (request.action === 'manage_session') {
+        const action = request.command || 'clear';
+        if (action === 'clear' || action === 'clear_all') {
           window.localStorage.clear();
           window.sessionStorage.clear();
           document.cookie.split(";").forEach((c) => {
@@ -392,116 +408,99 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
           });
           capturedLogs = [];
           respond({ status: "success", message: "Session/Cookies/Logs cleared." });
-        } catch (e) {
-          respond({ status: "error", message: e.toString() });
+        } else if (action === 'clear_logs') {
+          capturedLogs = [];
+          respond({ status: "success", message: "Logs cleared." });
+        } else {
+          respond({ status: "error", message: "Unknown command" });
         }
-      } else if (action === 'clear_logs') {
-        capturedLogs = [];
-        respond({ status: "success", message: "Logs cleared." });
-      } else {
-        respond({ status: "error", message: "Unknown command" });
-      }
-      return true;
-    }
-
-    if (request.action === 'get_performance_metrics') {
-      respond(PerfMon.getMetrics());
-      return true;
-    }
-
-    // if (request.action === 'get_network_traffic') {
-    //   const count = request.count || 20;
-    //   respond(networkLogs.slice(-count));
-    //   return true;
-    // }
-
-    if (request.action === 'audit_accessibility') {
-      if (typeof axe === 'undefined') {
-        respond({ error: 'axe-core library not loaded. Please ensure axe.min.js is injected.' });
-        return true;
+        return;
       }
 
-      // Ensure map is hydrated so we can match elements to IDs
-      if (window.uplink.map.size === 0) {
-        getPageSnapshot();
+      if (request.action === 'get_performance_metrics') {
+        respond(PerfMon.getMetrics());
+        return;
       }
 
-      const reverseMap = new Map();
-      for (const [id, el] of window.uplink.map.entries()) {
-        reverseMap.set(el, id);
-      }
+      if (request.action === 'audit_accessibility') {
+        if (typeof axe === 'undefined') {
+          respond({ error: 'axe-core library not loaded. Please ensure axe.min.js is injected.' });
+          return;
+        }
 
-      axe.run().then(results => {
-        const violations = results.violations.map(v => {
-          return {
-            id: v.id,
-            impact: v.impact,
-            description: v.description,
-            nodes: v.nodes.map(node => {
-              const el = node.element;
-              const mcpId = reverseMap.get(el);
-              return {
-                mcpId: mcpId || "N/A",
-                target: node.target,
-                html: node.html.slice(0, 100),
-                failureSummary: node.failureSummary
-              };
-            })
-          };
-        });
+        if (window.uplink.map.size === 0) {
+          getPageSnapshot();
+        }
 
-        respond({
-          url: results.url,
-          timestamp: results.timestamp,
-          violations: violations,
-          passesCount: results.passes.length,
-          incompleteCount: results.incomplete.length
-        });
-      }).catch(err => {
-        respond({ error: `Axe Run Error: ${err.message}` });
-      });
+        const reverseMap = new Map();
+        for (const [id, el] of window.uplink.map.entries()) {
+          reverseMap.set(el, id);
+        }
 
-      return true; // Async
-    }
-
-
-    // --- SEMANTIC SEARCH (Pre-Resolution) ---
-    if (request.action === 'semantic_find') {
-      const api = (typeof chrome !== "undefined") ? chrome : browser;
-
-      // 1. Gather all candidates
-      const candidates = [];
-      for (const [id, node] of window.uplink.map.entries()) {
-        const label = getLabel(node);
-        if (label && label.length > 2) {
-          const context = getContextAttrs(node);
-          candidates.push({
-            id: id,
-            text: `${label} ${context}`.trim()
+        try {
+          const results = await axe.run();
+          const violations = results.violations.map(v => {
+            return {
+              id: v.id,
+              impact: v.impact,
+              description: v.description,
+              nodes: v.nodes.map(node => {
+                const el = node.element;
+                const mcpId = reverseMap.get(el);
+                return {
+                  mcpId: mcpId || "N/A",
+                  target: node.target,
+                  html: node.html.slice(0, 100),
+                  failureSummary: node.failureSummary
+                };
+              })
+            };
           });
+
+          respond({
+            url: results.url,
+            timestamp: results.timestamp,
+            violations: violations,
+            passesCount: results.passes.length,
+            incompleteCount: results.incomplete.length
+          });
+        } catch (err) {
+          respond({ error: `Axe Run Error: ${err.message}` });
         }
+        return;
       }
 
-      if (candidates.length === 0) {
-        getPageSnapshot();
-        for (const [id, node] of window.uplink.map.entries()) {
-          const label = getLabel(node);
-          if (label && label.length > 2) {
-            const context = getContextAttrs(node);
-            candidates.push({ id: id, text: `${label} ${context}`.trim() });
+      // --- SEMANTIC SEARCH ---
+      if (request.action === 'semantic_find') {
+        const api = (typeof chrome !== "undefined") ? chrome : browser;
+
+        let candidates = [];
+        const collect = () => {
+          candidates = [];
+          for (const [id, node] of window.uplink.map.entries()) {
+            const label = getLabel(node);
+            if (label && label.length > 2) {
+              const context = getContextAttrs(node);
+              candidates.push({
+                id: id,
+                text: `${label} ${context}`.trim()
+              });
+            }
           }
-        }
-      }
+        };
+        collect();
 
-      // 2. Offload to Background AI
-      (async () => {
+        if (candidates.length === 0) {
+          getPageSnapshot();
+          collect();
+        }
+
         const bestMatch = await api.runtime.sendMessage({
           action: 'semantic_search',
           query: request.query,
           candidates: candidates
         });
 
-        // 3. Handle Result
         if (bestMatch && bestMatch.score > 0.3) {
           const matchEl = window.uplink.map.get(bestMatch.id);
           if (matchEl) {
@@ -518,96 +517,88 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
             : "No candidates returned by AI.";
           respond({ error: `No element found > 0.3. ${debugMsg}` });
         }
-      })();
-
-      return true; // Async wait
-    }
-
-    // --- GLOBAL ACTIONS (No Element Required) ---
-    if (request.action === 'scroll_page') {
-      const direction = request.direction || 'down';
-      const start = performance.now();
-
-      // Scroll amount: 80% of viewport height
-      const amount = window.innerHeight * 0.8;
-
-      if (direction === 'down') window.scrollBy({ top: amount, behavior: 'smooth' });
-      else if (direction === 'up') window.scrollBy({ top: -amount, behavior: 'smooth' });
-      else if (direction === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
-      else if (direction === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-
-      setTimeout(() => {
-        const duration = Math.round(performance.now() - start);
-        respond(`Scrolled ${direction} (Internal: ${duration}ms)`);
-      }, 500);
-      return true; // Async
-    }
-
-    // --- RESOLVE ELEMENT (ID vs Selector) ---
-    // Universal element resolution for all interaction tools
-    let el = null;
-
-
-    const selector = request.selector;
-
-    // Check if selector is a numeric ID (e.g., "42")
-    if (selector && /^\d+$/.test(selector)) {
-      const id = parseInt(selector);
-      el = window.uplink.map.get(id);
-      if (!el) {
-        // If using an ID that doesn't exist, we can't really "wait" for it easily 
-        // without re-parsing, but for now we'll just fail or let wait_for handle it differently?
-        // For now, if ID not found, treat as null.
+        return;
       }
-    } else if (selector) {
-      // Fallback to standard CSS selector
-      el = document.querySelector(selector);
+
+      // --- RESOLVE ELEMENT (ID vs Selector) ---
+      // Universal element resolution with AUTO-WAIT
+
+      const waitForElement = (selector, baseTimeout = 5000) => {
+        // Apply adaptive scaling
+        const effectiveTimeout = baseTimeout * window.uplink.adaptiveScale;
+
+        return new Promise((resolve) => {
+          // Immediate check
+          let el = null;
+          if (/^\d+$/.test(selector)) {
+            el = window.uplink.map.get(parseInt(selector));
+          } else {
+            el = document.querySelector(selector);
+          }
+
+          if (el) {
+            // Fast path: Decay scale slightly if we are consistently fast
+            window.uplink.adaptiveScale = Math.max(1.0, window.uplink.adaptiveScale - 0.05);
+            return resolve(el);
+          }
+
+          // Poll
+          const start = Date.now();
+          const interval = setInterval(() => {
+            if (Date.now() - start > effectiveTimeout) {
+              clearInterval(interval);
+              resolve(null);
+              return;
+            }
+
+            let found = null;
+            if (/^\d+$/.test(selector)) {
+              found = window.uplink.map.get(parseInt(selector));
+            } else {
+              found = document.querySelector(selector);
+            }
+
+            if (found) {
+              clearInterval(interval);
+
+              // Adaptive Logic:
+              const waitTime = Date.now() - start;
+              if (waitTime > 2000) {
+                window.uplink.adaptiveScale = Math.min(3.0, window.uplink.adaptiveScale + 0.5);
+                console.log(`[Uplink] Slow element found (${waitTime}ms). Increasing adaptive timeout scale to ${window.uplink.adaptiveScale.toFixed(1)}x`);
+              }
+
+              resolve(found);
+            }
+          }, 100);
+        });
+      };
+      resolve(null);
+      return;
     }
 
-    // ACTION: WAIT_FOR (Special handling for polling)
+          let found = null;
+    if (/^\d+$/.test(selector)) {
+    }
+
     if (request.action === 'wait_for') {
       const timeout = request.timeout || 15000;
-      const start = Date.now();
-
-      const check = () => {
-        let foundEl = null;
-        if (/^\d+$/.test(request.selector)) {
-          foundEl = window.uplink.map.get(parseInt(request.selector));
-        } else {
-          foundEl = document.querySelector(request.selector);
-        }
-
-        if (foundEl) {
-          foundEl.scrollIntoView({ behavior: "smooth", block: "center" });
-          createOverlay(foundEl.getBoundingClientRect(), "Found");
-          const waitTime = Date.now() - start;
-          respond(`Found element (waited ${waitTime}ms)`);
-        } else if (Date.now() - start > timeout) {
-          respond({ error: `Timeout waiting for ${request.selector}` });
-        } else {
-          requestAnimationFrame(check); // Poll every frame
-        }
-      };
-      check();
-      return true; // Async
+      const foundEl = await waitForElement(request.selector, timeout);
+      if (foundEl) {
+        foundEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        createOverlay(foundEl.getBoundingClientRect(), "Found");
+        respond("Found element");
+      } else {
+        respond({ error: `Timeout waiting for ${request.selector}` });
+      }
+      return;
     }
 
     // --- INTERACTION ---
-    // Handle default target for press_key if no selector provided
-    if (!el && request.action === 'press_key' && !request.selector) {
-      el = document.activeElement || document.body;
-    }
-
-    if (!el) {
-      respond({ error: `Element not found: ${request.selector}` });
-      return true;
-    }
-
-    // Standard interactions on 'el'
     if (request.action === 'highlight') {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       const rect = el.getBoundingClientRect();
-      createOverlay(rect, request.label || `ID: ${selector}`);
+      createOverlay(rect, request.label || `ID: ${request.selector}`);
       respond("Highlighted");
     }
     else if (request.action === 'click') {
@@ -649,10 +640,9 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
     else if (request.action === 'press_key') {
       const start = performance.now();
       const key = request.key;
-      // Simple modifier check (not full support yet)
       const options = {
         key: key,
-        code: key, // 'Enter' -> 'Enter'
+        code: key,
         keyCode: key === 'Enter' ? 13 : 0,
         which: key === 'Enter' ? 13 : 0,
         bubbles: true,
@@ -666,13 +656,6 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       const duration = Math.round(performance.now() - start);
       PerfMon.recordInteraction('press_key', duration);
-
-      // If it's an input and we are "typing" a single char, might want input event
-      if (key.length === 1 && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-        // This is complex, so for now just rely on raw events or assume type_text is used for typing.
-        // press_key is mostly for navigation/submission (Enter, Tab, Esc).
-      }
-
       respond(`Pressed ${key} (${duration}ms)`);
     }
     else if (request.action === 'hover') {
@@ -713,14 +696,13 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       respond(el.outerHTML);
     }
 
-
-
   } catch (e) {
     respond({ error: e.toString() });
   }
+})();
 
-  return true; // Keep channel open
-});
+return true; // Keep channel open
+    });
 
 // --- Markdown Converter ---
 function htmlToMarkdown(root) {

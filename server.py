@@ -333,51 +333,62 @@ async def read_page(format: str = "distilled") -> str:
     return await send_command({"action": "read", "format": format})
 
 @mcp.tool()
-async def click_element(selector: str, purpose: str = "") -> str:
+async def click_element(selector: str, purpose: str = "", timeout: int = 5000) -> str:
     """Clicks an element.
     ARGUMENTS:
         selector: The numeric ID from read_page (e.g., "42") OR a CSS selector.
                   ALWAYS prefer using the numeric ID if available from the 'distilled' view.
-        purpose: Optional label to show on the highlight overlay."""
+        purpose: Optional label to show on the highlight overlay.
+        timeout: Max wait time in ms (default 5000)."""
     # 1. Highlight
     await send_command({
         "action": "highlight",
         "selector": selector,
-        "label": purpose
+        "label": purpose,
+        "timeout": timeout
     })
     await asyncio.sleep(0.5) # Brief pause for visibility
     
     # 2. Click
-    return await send_command({"action": "click", "selector": selector})
+    return await send_command({
+        "action": "click", 
+        "selector": selector,
+        "timeout": timeout
+    })
 
 @mcp.tool()
-async def type_text(selector: str, text: str) -> str:
-    """Types text into an element defined by a CSS selector."""
+async def type_text(selector: str, text: str, timeout: int = 5000) -> str:
+    """Types text into an element defined by a CSS selector.
+    timeout: Max wait time in ms (default 5000)."""
     # 1. Highlight
     await send_command({
         "action": "highlight",
         "selector": selector,
-        "label": f"Typing: {text}"
+        "label": f"Typing: {text}",
+        "timeout": timeout
     })
     
     return await send_command({
         "action": "type",
         "selector": selector,
-        "text": text
+        "text": text,
+        "timeout": timeout
     })
 
 @mcp.tool()
-async def press_key(key: str, selector: str = None) -> str:
+async def press_key(key: str, selector: str = None, timeout: int = 5000) -> str:
     """Presses a key on the page or on a specific element.
     ARGUMENTS:
         key: The key to press (e.g., 'Enter', 'ArrowDown', 'Backspace', 'a', 'b').
         selector: Optional. If provided, the key press is dispatched to this element.
                   Otherwise, it is dispatched to the document/body.
+        timeout: Max wait time in ms (default 5000).
     """
     return await send_command({
         "action": "press_key",
         "key": key,
-        "selector": selector
+        "selector": selector,
+        "timeout": timeout
     })
 
 @mcp.tool()
@@ -399,20 +410,24 @@ async def get_extension_status() -> str:
     return await send_command({"action": "get_status"})
 
 @mcp.tool()
-async def hover_element(selector: str) -> str:
-    """Hovers over an element defined by a CSS selector."""
+async def hover_element(selector: str, timeout: int = 5000) -> str:
+    """Hovers over an element defined by a CSS selector.
+    timeout: Max wait time in ms (default 5000)."""
     return await send_command({
         "action": "hover",
-        "selector": selector
+        "selector": selector,
+        "timeout": timeout
     })
 
 @mcp.tool()
-async def select_option(selector: str, value: str) -> str:
-    """Selects an option in a <select> element by its value."""
+async def select_option(selector: str, value: str, timeout: int = 5000) -> str:
+    """Selects an option in a <select> element by its value.
+    timeout: Max wait time in ms (default 5000)."""
     return await send_command({
         "action": "select_option",
         "selector": selector,
-        "value": value
+        "value": value,
+        "timeout": timeout
     })
 
 @mcp.tool()
