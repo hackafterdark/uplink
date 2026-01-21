@@ -124,7 +124,47 @@ if not os.path.isabs(DOWNLOAD_DIR):
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 logging.info(f"Downloads directory set to: {DOWNLOAD_DIR}")
 
+import subprocess
+
+def kill_port_process(port):
+    """
+    Kills any process listening on the specified port.
+    Cross-platform: Windows (netstat/taskkill), Unix (lsof/kill).
+    """
+    logging.info(f"Checking for processes on port {port}...")
+    try:
+        if sys.platform == 'win32':
+             # Windows: netstat -> find PID -> taskkill
+             # "netstat -aon" output format:
+             # TCP    0.0.0.0:8765           0.0.0.0:0              LISTENING       1234
+             # We look for :<port> and LISTENING
+             cmd = 'netstat -aon'
+             output = subprocess.check_output(cmd, shell=True).decode()
+             for line in output.splitlines():
+                 if f":{port}" in line and "LISTENING" in line:
+                     parts = line.split()
+                     pid = parts[-1] # PID is the last element
+                     logging.warning(f"Port {port} is busy. Killing PID {pid}...")
+                     subprocess.run(f"taskkill /F /PID {pid}", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        else:
+             # Unix: lsof -> kill
+             cmd = f"lsof -ti:{port}"
+             try:
+                 output = subprocess.check_output(cmd.split()).decode().strip()
+                 if output:
+                     pids = output.split()
+                     for pid in pids:
+                         logging.warning(f"Port {port} is busy. Killing PID {pid}...")
+                         os.kill(int(pid), 9) 
+             except subprocess.CalledProcessError:
+                 pass # No process found
+    except Exception as e:
+        logging.error(f"Error trying to free port {port}: {e}")
+
 async def start_ws():
+    # Try to free the port first
+    kill_port_process(PORT)
+    
     logging.info(f"Starting WebSocket server on port {PORT} (ws://127.0.0.1:{PORT})...")
     print(f"DEBUG: Attempting to start WebSocket server on port {PORT}...")
     
@@ -158,15 +198,70 @@ async def start_ws():
             logging.error(f"CRITICAL ERROR: {e}")
             raise
 
+# --- Watchdog ---
+async def monitor_parent_process():
+    """
+    Monitors the parent process. If it dies, we die.
+    Essential for Windows where 'cmd.exe' wrapper might die but 'python.exe' persists.
+    """
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            # Get parent process ID
+            ppid = os.getppid()
+            logging.info(f"Watchdog active. Monitoring Parent PID: {ppid}")
+            
+            kernel32 = ctypes.windll.kernel32
+            SYNCHRONIZE = 0x00100000
+            
+            while True:
+                # Open process with SYNCHRONIZE access
+                handle = kernel32.OpenProcess(SYNCHRONIZE, False, ppid)
+                if not handle:
+                    logging.warning("Watchdog: Parent process handle invalid. Assuming parent died.")
+                    break
+                
+                # Check exit code (STILL_ACTIVE = 259)
+                exit_code = ctypes.c_ulong()
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                kernel32.CloseHandle(handle)
+                
+                if exit_code.value != 259:
+                     logging.warning(f"Watchdog: Parent exited with code {exit_code.value}. Terminating server.")
+                     break
+                     
+                await asyncio.sleep(2) # Check every 2s
+        else:
+            # Unix-like (easier)
+            ppid = os.getppid()
+            logging.info(f"Watchdog active. Monitoring Parent PID: {ppid}")
+            while True:
+                try:
+                    os.kill(ppid, 0) # Signal 0 checks existence
+                    await asyncio.sleep(2)
+                except OSError:
+                    logging.warning("Watchdog: Parent process died. Terminating server.")
+                    break
+                    
+    except Exception as e:
+        logging.error(f"Watchdog Error: {e}")
+    
+    # If we break loop, suicide
+    logging.error("💀 Parent died. Watchdog triggering self-termination.")
+    os._exit(0) # Force hard exit
+
 # --- MCP Lifecycle ---
 @asynccontextmanager
 async def lifespan(server):
     logging.info("Starting MCP Server...")
     ws_task = asyncio.create_task(start_ws())
+    # watchdog_task = asyncio.create_task(monitor_parent_process()) # Disabled: False positives on Windows wrappers
     yield
     ws_task.cancel()
+    # watchdog_task.cancel()
     try:
         await ws_task
+        # await watchdog_task
     except asyncio.CancelledError:
         pass
 
@@ -176,9 +271,19 @@ mcp = FastMCP("BrowserBridge", lifespan=lifespan)
 async def send_command(command: dict) -> str:
     """Sends a JSON command to the browser and waits for a response."""
     global browser_socket
+    
+    # 1. Wait for connection (Handle Race Condition on Restart)
     if not browser_socket:
-        logging.error("Attempted command but browser_socket is None")
-        return "Error: Browser not connected. Please install the extension and reload the page."
+        logging.info("Browser not connected. Waiting up to 15s for connection...")
+        for i in range(30): # 30 * 0.5s = 15s wait
+            if browser_socket:
+                logging.info("Browser connected! Proceeding...")
+                break
+            await asyncio.sleep(0.5)
+            
+    if not browser_socket:
+        logging.error("Attempted command but browser_socket is None after wait")
+        return "Error: Browser not connected. Please ensure the extension is installed and active, then try again."
     
     async with socket_lock:
         try:
@@ -379,6 +484,16 @@ async def scroll_into_view(selector: str) -> str:
 async def get_console_logs() -> str:
     """Retrieves captured console logs from the browser extension."""
     return await send_command({"action": "get_logs"})
+
+@mcp.tool()
+async def get_network_traffic(count: int = 20) -> str:
+    """Retrieves recent network traffic (fetch/xhr) from the browser. 
+    Returns the last 'count' requests (default 20).
+    Captures method, URL, status, and response bodies for text/json content."""
+    return await send_command({
+        "action": "get_network_traffic",
+        "count": count
+    })
 
 @mcp.tool()
 async def wait_for_element(selector: str, timeout: int = 15000) -> str:

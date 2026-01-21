@@ -11,11 +11,18 @@ try {
   console.log("Browser Bridge: Failed to inject console interceptor", e);
 }
 
-// Listen for the logs
+// Listen for the logs (Console & Network)
 let capturedLogs = [];
+let networkLogs = [];
+
 window.addEventListener('mcp-console-log', (e) => {
   capturedLogs.push(e.detail);
   if (capturedLogs.length > 500) capturedLogs.shift();
+});
+
+window.addEventListener('mcp-network-log', (e) => {
+  networkLogs.push(e.detail);
+  if (networkLogs.length > 100) networkLogs.shift(); // Keep last 100 requests
 });
 
 // --- Performance Monitor ---
@@ -399,6 +406,12 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'get_performance_metrics') {
       respond(PerfMon.getMetrics());
+      return true;
+    }
+
+    if (request.action === 'get_network_traffic') {
+      const count = request.count || 20;
+      respond(networkLogs.slice(-count));
       return true;
     }
 

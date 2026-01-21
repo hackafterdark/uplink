@@ -5,9 +5,7 @@
 # Ensure we are in the script's directory so relative paths work
 cd "$(dirname "$0")" || exit
 
-echo "Stopping any existing Uplink server instances..."
-# Kill processes matching "server.py" to release the port
-# pkill -f "python.*server.py" 2>/dev/null
+echo "Stopping any existing Uplink server instances..." >&2
 
 echo "Starting Uplink Server..."
 
@@ -34,4 +32,4 @@ pip install -q -r requirements.txt >&2
 
 # Run the server
 echo "Starting Uplink Server..." >&2
-python server.py "$@"
+exec python server.py "$@"

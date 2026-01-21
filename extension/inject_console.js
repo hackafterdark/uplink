@@ -67,19 +67,98 @@
     capture('error', `Unhandled Promise Rejection: ${event.reason}`, event.reason?.stack);
   });
 
+  // --- Network Capture ---
+  function captureNetwork(data) {
+    try {
+      window.dispatchEvent(new CustomEvent('mcp-network-log', {
+        detail: {
+          timestamp: Date.now(),
+          ...data
+        }
+      }));
+    } catch (e) { }
+  }
+
   // Hook Fetch
   const _fetch = window.fetch;
   window.fetch = async (...args) => {
+    const method = args[1]?.method || 'GET';
+    const url = String(args[0]);
+
     try {
       const response = await _fetch(...args);
-      if (!response.ok) {
-        capture('error', `Fetch Error: ${response.status} ${response.statusText}`, `URL: ${args[0]}`);
-      }
+
+      // Clone to read body without consuming original stream
+      const clone = response.clone();
+
+      // Asynchronously process response
+      (async () => {
+        let body = null;
+        const contentType = clone.headers.get('content-type') || '';
+
+        // Only read text/json to avoid perf issues
+        if (contentType.includes('json') || contentType.includes('text') || contentType.includes('xml')) {
+          try {
+            const text = await clone.text();
+            body = text.slice(0, 10000); // Limit to 10KB
+            if (text.length > 10000) body += '...[TRUNCATED]';
+          } catch (e) { body = `[Error reading body: ${e.message}]`; }
+        } else {
+          body = `[Binary/Opaque Content: ${contentType}]`;
+        }
+
+        captureNetwork({
+          type: 'fetch',
+          method: method,
+          url: url,
+          status: response.status,
+          statusText: response.statusText,
+          response: body
+        });
+      })();
+
       return response;
     } catch (e) {
-      capture('error', `Fetch Failed: ${e.message}`, `URL: ${args[0]}`);
+      captureNetwork({ type: 'fetch', method, url, status: 0, statusText: 'Current Error: ' + e.message, response: null });
       throw e;
     }
+  };
+
+  // Hook XHR
+  const _open = XMLHttpRequest.prototype.open;
+  const _send = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function (method, url) {
+    this._mcp_metadata = { method, url };
+    return _open.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function (body) {
+    this.addEventListener('load', () => {
+      if (!this._mcp_metadata) return;
+
+      let responseBody = null;
+      try {
+        const contentType = this.getResponseHeader('content-type') || '';
+        if (this.responseType === '' || this.responseType === 'text') {
+          responseBody = this.responseText.slice(0, 10000);
+        } else if (this.responseType === 'json') {
+          responseBody = JSON.stringify(this.response); // Helper only
+        } else {
+          responseBody = `[${this.responseType || 'blob'}]`;
+        }
+      } catch (e) { responseBody = `[Error: ${e.message}]`; }
+
+      captureNetwork({
+        type: 'xhr',
+        method: this._mcp_metadata.method,
+        url: this._mcp_metadata.url,
+        status: this.status,
+        statusText: this.statusText,
+        response: responseBody
+      });
+    });
+    return _send.apply(this, arguments);
   };
 
 })();

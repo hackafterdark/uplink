@@ -78,4 +78,5 @@ This document provides a comprehensive list of tools available in the Uplink MCP
 | `get_page_performance` | Returns a holistic performance report: TTFB, FCP, Page Load, and **Interaction Timings**. | None |
 | `audit_accessibility` | Checks the page for accessibility violations using **axe-core**. Returns a summarized report mapped to Numeric IDs. | None |
 | `get_console_logs` | Retrieves raw captured console logs from the browser extension. Moved here from Data Extraction. | None |
+| `get_network_traffic` | Retrieves captured network traffic (fetch/xhr). Returns HTTP method, URL, status, and truncated response bodies. | `count` (int, default 20) |
 
