@@ -409,11 +409,11 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
-    if (request.action === 'get_network_traffic') {
-      const count = request.count || 20;
-      respond(networkLogs.slice(-count));
-      return true;
-    }
+    // if (request.action === 'get_network_traffic') {
+    //   const count = request.count || 20;
+    //   respond(networkLogs.slice(-count));
+    //   return true;
+    // }
 
     if (request.action === 'audit_accessibility') {
       if (typeof axe === 'undefined') {

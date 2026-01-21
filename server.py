@@ -485,15 +485,15 @@ async def get_console_logs() -> str:
     """Retrieves captured console logs from the browser extension."""
     return await send_command({"action": "get_logs"})
 
-@mcp.tool()
-async def get_network_traffic(count: int = 20) -> str:
-    """Retrieves recent network traffic (fetch/xhr) from the browser. 
-    Returns the last 'count' requests (default 20).
-    Captures method, URL, status, and response bodies for text/json content."""
-    return await send_command({
-        "action": "get_network_traffic",
-        "count": count
-    })
+# @mcp.tool()
+# async def get_network_traffic(count: int = 20) -> str:
+#     """Retrieves recent network traffic (fetch/xhr) from the browser. 
+#     Returns the last 'count' requests (default 20).
+#     Captures method, URL, status, and response bodies for text/json content."""
+#     return await send_command({
+#         "action": "get_network_traffic",
+#         "count": count
+#     })
 
 @mcp.tool()
 async def wait_for_element(selector: str, timeout: int = 15000) -> str:
