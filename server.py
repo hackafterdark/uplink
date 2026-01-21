@@ -149,15 +149,12 @@ async def start_ws():
                     continue
                 else:
                     msg = f"ERROR: Port {PORT} is still in use after {max_retries} attempts. giving up."
-                    print(msg)
                     logging.error(msg)
                     raise
             else:
-                print(f"ERROR: Failed to start WebSocket server: {e}")
                 logging.error(f"Failed to start WebSocket server: {e}")
                 raise
         except Exception as e:
-            print(f"CRITICAL ERROR: {e}")
             logging.error(f"CRITICAL ERROR: {e}")
             raise
 

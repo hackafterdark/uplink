@@ -21,17 +21,17 @@ fi
 # Check for virtual environment
 VENV_DIR="venv"
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment..."
-    $PYTHON_CMD -m venv "$VENV_DIR"
+    echo "Creating virtual environment..." >&2
+    $PYTHON_CMD -m venv "$VENV_DIR" >&2
 fi
 
 # Activate virtual environment
 source "$VENV_DIR/bin/activate"
 
 # Install dependencies (quietly) inside venv
-echo "Installing dependencies..."
-pip install -q -r requirements.txt
+echo "Installing dependencies..." >&2
+pip install -q -r requirements.txt >&2
 
 # Run the server
-echo "Starting Uplink Server..."
+echo "Starting Uplink Server..." >&2
 python server.py "$@"
