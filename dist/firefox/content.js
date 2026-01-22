@@ -771,6 +771,8 @@ function htmlToMarkdown(root) {
       return;
     }
 
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
     const tag = node.tagName.toLowerCase();
     let prefix = '';
     let suffix = '';
