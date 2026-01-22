@@ -17,7 +17,7 @@ import logging
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s [PID:%(process)d] [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("server.log", encoding='utf-8', mode='a'),
         logging.StreamHandler()
@@ -197,6 +197,10 @@ async def start_ws():
         except Exception as e:
             logging.error(f"CRITICAL ERROR: {e}")
             raise
+    
+    # If we fall through loop (retries exhausted)
+    logging.critical(f"Could not bind port {PORT}. Exiting.")
+    os._exit(1)
 
 # --- Watchdog ---
 async def monitor_parent_process():
