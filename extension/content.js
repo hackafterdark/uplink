@@ -581,6 +581,12 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
             let found = null;
             if (/^\d+$/.test(selector)) {
               found = window.uplink.map.get(parseInt(selector));
+
+              // If not found in map, force a re-index (snapshot) because the DOM might have changed
+              if (!found) {
+                getPageSnapshot(); // Updates window.uplink.map
+                found = window.uplink.map.get(parseInt(selector));
+              }
             } else {
               found = document.querySelector(selector);
             }

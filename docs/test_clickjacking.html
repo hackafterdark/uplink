@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Security Toggle Test (Attack Simulation)</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f0f0; }
+        .container { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+        iframe {
+            width: 800px;
+            height: 600px;
+            border: 5px solid red;
+            background: white;
+        }
+        .status { padding: 10px; background: #fff; border-radius: 8px; max-width: 600px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚔️ Security Toggle Test</h1>
+        <div class="status">
+            <p><strong>Scenario:</strong> This is a random local page trying to frame your App.</p>
+            <p><strong>Expected Behavior:</strong></p>
+            <ul>
+                <li><strong>Toggle OFF (Secure):</strong> The red box below should be BLANK or show a "Refused to connect" error.</li>
+                <li><strong>Toggle ON (Bypass):</strong> The red box below should LOAD the App content.</li>
+            </ul>
+        </div>
+        
+        <!-- Target specific URL provided by user -->
+        <iframe src="https://www.google.com"></iframe>
+    </div>
+</body>
+</html>

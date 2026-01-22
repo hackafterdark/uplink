@@ -24,6 +24,7 @@ const statusEl = document.getElementById('connectionStatus');
 const statusText = document.getElementById('statusText');
 const panicToggle = document.getElementById('panicToggle');
 const localFileToggle = document.getElementById('localFileToggle');
+const iframeToggle = document.getElementById('iframeToggle');
 const logsContainer = document.getElementById('logs');
 const blocklistInput = document.getElementById('blocklistInput');
 const addBlockBtn = document.getElementById('addBlockBtn');
@@ -94,6 +95,7 @@ api.storage.local.get(['rateLimitMs', 'serverPort', 'panicMode', 'allowLocalFile
   if (res.serverPort) portInput.value = res.serverPort;
   if (res.panicMode !== undefined) panicToggle.checked = res.panicMode;
   if (res.allowLocalFiles !== undefined) localFileToggle.checked = res.allowLocalFiles;
+  if (res.bypassIframeSecurity !== undefined) iframeToggle.checked = res.bypassIframeSecurity;
   if (res.allowDataTools !== undefined) dataToolsToggle.checked = res.allowDataTools;
   if (res.userBlocklist) {
     renderBlocklist(res.userBlocklist);
@@ -138,6 +140,11 @@ port.onMessage.addListener((msg) => {
     // Update Local File Switch
     if (localFileToggle.checked !== msg.state.allowLocalFiles) {
       localFileToggle.checked = msg.state.allowLocalFiles;
+    }
+
+    // Update Iframe Toggle
+    if (iframeToggle.checked !== msg.state.bypassIframeSecurity) {
+      iframeToggle.checked = msg.state.bypassIframeSecurity;
     }
 
     // Update Data Tools Switch
@@ -211,7 +218,15 @@ panicToggle.addEventListener('change', (e) => {
 localFileToggle.addEventListener('change', (e) => {
   const allowed = e.target.checked;
   api.storage.local.set({ allowLocalFiles: allowed });
+  api.storage.local.set({ allowLocalFiles: allowed });
   try { port.postMessage({ type: "SET_LOCAL_FILES", value: allowed }); } catch (e) { }
+});
+
+// Iframe Security Toggle
+iframeToggle.addEventListener('change', (e) => {
+  const allowed = e.target.checked;
+  api.storage.local.set({ bypassIframeSecurity: allowed });
+  try { port.postMessage({ type: "SET_IFRAME_BYPASS", value: allowed }); } catch (e) { }
 });
 
 // Data Tools Toggle

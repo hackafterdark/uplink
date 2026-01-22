@@ -21,6 +21,7 @@ let logHistory = []; // persist logs in memory
 // --- SECURITY STATE ---
 let allowLocalFiles = false; // Default: Block file://
 let allowDataTools = true; // Default: Allow cookies/storage
+let bypassIframeSecurity = false; // Default: Secure (headers intact)
 let userBlocklist = []; // User-defined glob patterns
 let lastCommandTime = 0;
 let rateLimitMs = 500; // Default 500ms
@@ -189,12 +190,16 @@ const RESTRICTED_PROTOCOLS = ['chrome:', 'edge:', 'about:', 'brave:', 'opera:'];
 api.storage.local.get(['allowLocalFiles', 'allowDataTools', 'userBlocklist', 'panicMode', 'rateLimitMs', 'serverPort', 'aiModelId', 'customHubUrl'], (result) => {
   if (result.allowLocalFiles !== undefined) allowLocalFiles = result.allowLocalFiles;
   if (result.allowDataTools !== undefined) allowDataTools = result.allowDataTools;
+  if (result.bypassIframeSecurity !== undefined) bypassIframeSecurity = result.bypassIframeSecurity;
   if (result.userBlocklist !== undefined) userBlocklist = result.userBlocklist;
   if (result.panicMode !== undefined) panicMode = result.panicMode;
   if (result.rateLimitMs !== undefined) rateLimitMs = result.rateLimitMs;
   if (result.serverPort !== undefined) serverPort = result.serverPort;
   if (result.aiModelId !== undefined) aiModelId = result.aiModelId;
   if (result.customHubUrl !== undefined) customHubUrl = result.customHubUrl;
+
+  // Sync Security Rules from Storage
+  updateSecurityRules();
 
   // Initial Connection (After settings load)
   connect();
@@ -207,27 +212,72 @@ function globToRegex(pattern) {
   return new RegExp(`^${finalParams}$`, 'i');
 }
 
-// --- MOZILLA/LIBREWOLF HEADER STRIPPING (Fallback for declarativeNetRequest) ---
-// Chrome MV3 bans blocking webRequest, but Firefox MV3 supports it.
-// We try to register it; if it fails (Chrome), we ignore.
-try {
-  if (api.webRequest && api.webRequest.onHeadersReceived) {
-    api.webRequest.onHeadersReceived.addListener(
-      (details) => {
-        const responseHeaders = details.responseHeaders.filter(h => {
-          const name = h.name.toLowerCase();
-          return name !== 'x-frame-options' && name !== 'content-security-policy' && name !== 'frame-options';
+// --- SECURITY: HEADER STRIPPING (DNR & WebRequest) ---
+function updateSecurityRules() {
+  const enabled = bypassIframeSecurity;
+  console.log(`🔒 Security Update: Bypass Iframe Protection = ${enabled}`);
+  broadcastLog("SECURITY", `Updates: Bypass=${enabled}`);
+
+  // 1. Declarative Net Request (Chrome/All)
+  if (api.declarativeNetRequest) {
+    const options = enabled
+      ? { enableRulesetIds: ['ruleset_2'] }
+      : { disableRulesetIds: ['ruleset_2'] };
+
+    api.declarativeNetRequest.updateEnabledRulesets(options)
+      .then(() => {
+        api.declarativeNetRequest.getEnabledRulesets(rules => {
+          console.log("DNR State:", rules);
+          broadcastLog("DIAGNOSTIC", `Active DNR Rules: ${JSON.stringify(rules)}`);
         });
-        return { responseHeaders };
-      },
-      { urls: ["<all_urls>"] },
-      ["blocking", "responseHeaders"]
-    );
-    console.log("✅ Mozilla WebRequest Blocking Active: XFO/CSP stripping enabled.");
+      })
+      .catch(err => {
+        console.log("DNR Toggle Error:", err);
+        broadcastLog("ERROR", `DNR Error: ${err.message}`);
+      });
   }
-} catch (e) {
-  console.log("ℹ️ WebRequest Blocking not supported (Chrome MV3 standard). Using DNR rules.");
+
+  // 2. WebRequest Blocking (Firefox/Mozilla only)
+  try {
+    if (api.webRequest && api.webRequest.onHeadersReceived) {
+      if (enabled) {
+        if (!api.webRequest.onHeadersReceived.hasListener(stripHeaders)) {
+          api.webRequest.onHeadersReceived.addListener(
+            stripHeaders,
+            { urls: ["<all_urls>"] },
+            ["blocking", "responseHeaders"]
+          );
+          console.log("✅ WebRequest Blocking: Enabled");
+          broadcastLog("SECURITY", "WebRequest Listener ADDED");
+        } else {
+          broadcastLog("DIAGNOSTIC", "WebRequest Listener already active");
+        }
+      } else {
+        if (api.webRequest.onHeadersReceived.hasListener(stripHeaders)) {
+          api.webRequest.onHeadersReceived.removeListener(stripHeaders);
+          console.log("🛡️ WebRequest Blocking: Disabled");
+          broadcastLog("SECURITY", "WebRequest Listener REMOVED");
+        } else {
+          broadcastLog("DIAGNOSTIC", "WebRequest Listener already inactive");
+        }
+      }
+    } else {
+      broadcastLog("DIAGNOSTIC", "WebRequest API not available");
+    }
+  } catch (e) {
+    broadcastLog("ERROR", `WebRequest Error: ${e.message}`);
+  }
 }
+
+// Handler for WebRequest (Must be a named function for removeListener)
+function stripHeaders(details) {
+  const responseHeaders = details.responseHeaders.filter(h => {
+    const name = h.name.toLowerCase();
+    return name !== 'x-frame-options' && name !== 'content-security-policy' && name !== 'frame-options';
+  });
+  return { responseHeaders };
+}
+
 
 function checkUrlAllowed(url) {
   if (!url) return true;
@@ -441,6 +491,12 @@ api.runtime.onConnect.addListener((port) => {
           api.storage.local.set({ allowLocalFiles: allowLocalFiles });
           broadcastState();
         }
+        if (msg.type === "SET_IFRAME_BYPASS") {
+          bypassIframeSecurity = msg.value;
+          updateSecurityRules(); // Apply immediately
+          broadcastState();
+        }
+
         if (msg.type === "SET_ALLOW_DATA_TOOLS") {
           allowDataTools = msg.value;
           api.storage.local.set({ allowDataTools: allowDataTools });
@@ -529,6 +585,7 @@ function broadcastState() {
     connected: socket && socket.readyState === WebSocket.OPEN,
     panicMode: panicMode,
     allowLocalFiles: allowLocalFiles,
+    bypassIframeSecurity: bypassIframeSecurity,
     allowDataTools: allowDataTools,
     userBlocklist: userBlocklist,
     rateLimitMs: rateLimitMs,
