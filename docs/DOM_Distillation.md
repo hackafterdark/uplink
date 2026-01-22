@@ -15,9 +15,12 @@ When building AI agents that interact with the web, giving them raw access to th
 ### Key Features (v2 Parser)
 
 1.  **Numeric IDs (The "Magic Link")**:
-    *   Every interactive element is assigned a temporary, unique numeric ID (e.g., `[42]`).
-    *   The AI simply says `click_element(42)`.
-    *   **Why?** It eliminates selector hallucination. The ID is shorter than a CSS selector and is guaranteed to reference the exact element in memory.
+    *   Every interactive element is assigned a temporary, unique numeric ID.
+    *   **Format:** `[FrameId::ElementId]` (e.g., `[0::42]`).
+        *   `0`: The Main Frame (the page you see).
+        *   `1+`: Iframe IDs (for cross-origin frames).
+    *   **Usage:** The AI simply says `click_element("0::42")` (or just `42` for the main frame).
+    *   **Why?** It guarantees 100% addressability across iframes while protecting against selector hallucination.
 
 2.  **Smarter Labeling**:
     *   A button with an icon often has empty text (`<button><img src="..."/></button>`).
