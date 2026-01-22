@@ -132,7 +132,10 @@ function createOverlay(rect, labelText) {
 // --- Global State for Uplink ---
 window.uplink = {
   map: new Map(), // Stores ID -> Element Reference
-  idCounter: 0
+  idCounter: 0,
+  adaptiveScale: 1.0,
+  // Expose for executeScript
+  getSnapshot: getPageSnapshot
 };
 
 // --- Semantic DOM Parser ---
