@@ -321,6 +321,29 @@ function getPageSnapshot() {
       if (node.shadowRoot) {
         processNode(node.shadowRoot);
       }
+
+      // 5. Handle Iframes (Recursion for Same-Origin, Placeholder for Cross-Origin)
+      if (tag === 'iframe') {
+        try {
+          // Attempt recursive access (Same-Origin)
+          const doc = node.contentDocument;
+          if (doc && doc.body) {
+            output.push(`    [Iframe: ${node.title || 'Untitled'} (Same-Origin)]`);
+            // We can't easily indent the recursive output without passing a level
+            // But simpler is better: just recurse.
+            // Ideally we'd wrap this in a block, but flat list is fine for now
+            processNode(doc.body);
+            output.push(`    [End Iframe]`);
+          } else {
+            throw new Error("Empty or inaccessible");
+          }
+        } catch (e) {
+          // Cross-Origin or accessible but empty
+          const src = node.getAttribute('src') || 'about:blank';
+          const title = node.getAttribute('title') || 'Untitled';
+          output.push(`    [Cross-Origin Iframe] "${title}" src="${src}"`);
+        }
+      }
     }
   }
 
@@ -720,7 +743,7 @@ function htmlToMarkdown(root) {
       if (style.display === 'none' || style.visibility === 'hidden') return;
 
       const tag = node.tagName.toLowerCase();
-      if (['script', 'style', 'noscript', 'iframe', 'svg', 'button', 'input', 'select', 'textarea'].includes(tag)) return;
+      if (['script', 'style', 'noscript', 'svg', 'button', 'input', 'select', 'textarea'].includes(tag)) return;
     }
 
     if (node.nodeType === Node.TEXT_NODE) {
@@ -764,6 +787,11 @@ function htmlToMarkdown(root) {
       const src = node.getAttribute('src') || '';
       if (src) output += `![${alt}](${src})`;
       return; // No children needed for img
+    } else if (tag === 'iframe') {
+      const src = node.getAttribute('src') || 'about:blank';
+      const title = node.getAttribute('title') || 'Iframe';
+      output += `\n[Iframe: ${title}](${src})\n`;
+      return;
     }
 
     output += prefix;

@@ -759,21 +759,24 @@ async function handleCommand(command) {
       // 1. Execute getSnapshot in ALL frames
       const results = await api.scripting.executeScript({
         target: { tabId: tabId, allFrames: true },
-        func: () => window.uplink ? window.uplink.getSnapshot() : null
+        func: () => (window.uplink ? window.uplink.getSnapshot() : null)
       });
 
       // 2. Aggregate and Namespace IDs
       let finalOutput = "";
       for (const frameResult of results) {
-        if (!frameResult.result) continue; // Skip failed/empty frames
+        // if (!frameResult.result) continue; // Old behavior: skip empty
 
         const frameId = frameResult.frameId;
         let diff = frameResult.result;
 
-        // Rewrite IDs: [123] -> [frameId::123]
-        // This regex looks for [digits] pattern used by distilled output
-        // We use a specific replacement to avoid hitting other numbers
-        diff = diff.replace(/\[(\d+)\]/g, `[${frameId}::$1]`);
+        if (!diff) {
+          // Diagnostic: Why is it empty?
+          diff = "(No content returned - likely window.uplink not initialized or frame is cross-origin restricted)";
+        } else {
+          // Rewrite IDs: [123] -> [frameId::123]
+          diff = diff.replace(/\[(\d+)\]/g, `[${frameId}::$1]`);
+        }
 
         finalOutput += `\n--- Frame ${frameId} ---\n` + diff;
       }
