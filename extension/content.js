@@ -1,4 +1,5 @@
 // --- Console Interception ---
+console.log("Browser Bridge: Content script initializing...");
 try {
   // Inject script from file to avoid CSP inline-script violations
   const script = document.createElement('script');
@@ -125,7 +126,7 @@ function createOverlay(rect, labelText) {
     overlay.appendChild(label);
   }
 
-  document.body.appendChild(overlay);
+  (document.fullScreenElement || document.documentElement || document.body).appendChild(overlay);
   setTimeout(() => overlay.remove(), 2500);
 }
 
@@ -599,136 +600,148 @@ api.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }, 100);
         });
       };
-      resolve(null);
-      return;
-    }
 
-          let found = null;
-    if (/^\d+$/.test(selector)) {
-    }
-
-    if (request.action === 'wait_for') {
-      const timeout = request.timeout || 15000;
-      const foundEl = await waitForElement(request.selector, timeout);
-      if (foundEl) {
-        foundEl.scrollIntoView({ behavior: "smooth", block: "center" });
-        createOverlay(foundEl.getBoundingClientRect(), "Found");
-        respond("Found element");
-      } else {
-        respond({ error: `Timeout waiting for ${request.selector}` });
+      if (request.action === 'wait_for') {
+        const timeout = request.timeout || 15000;
+        const foundEl = await waitForElement(request.selector, timeout);
+        if (foundEl) {
+          foundEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          createOverlay(foundEl.getBoundingClientRect(), "Found");
+          respond("Found element");
+        } else {
+          respond({ error: `Timeout waiting for ${request.selector}` });
+        }
+        return;
       }
-      return;
-    }
 
-    // --- INTERACTION ---
-    if (request.action === 'highlight') {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      const rect = el.getBoundingClientRect();
-      createOverlay(rect, request.label || `ID: ${request.selector}`);
-      respond("Highlighted");
-    }
-    else if (request.action === 'click') {
-      const start = performance.now();
-      el.click();
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-      const duration = Math.round(performance.now() - start);
-      PerfMon.recordInteraction('click', duration);
-      respond(`Clicked (Internal: ${duration}ms)`);
-    }
-    else if (request.action === 'type') {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      const rect = el.getBoundingClientRect();
 
-      let label = `Typing: ${request.text}`;
-      if (el.type === 'password') {
-        label = "Typing: ••••••••";
+      // --- INTERACTION ---
+      // Resolve element for interaction tools
+      // This logic was missing, causing "ReferenceError: el is not defined"
+      let el = null;
+      if (['highlight', 'click', 'type', 'press_key', 'hover', 'select_option', 'get_html'].includes(request.action)) {
+        if (!request.selector && !request.elementId) {
+          respond({ error: "Missing selector" });
+          return;
+        }
+        const sel = request.selector || request.elementId;
+        // Use the robust waiter even for quick interactions to handle slight delays
+        el = await waitForElement(sel, 2000);
+
+        if (!el) {
+          respond({ error: `Element not found: ${sel}` });
+          return;
+        }
       }
-      createOverlay(rect, label);
 
-      const start = performance.now();
-      if (el.isContentEditable) {
-        el.focus();
-        document.execCommand('insertText', false, request.text);
+      if (request.action === 'highlight') {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        const rect = el.getBoundingClientRect();
+        createOverlay(rect, request.label || `ID: ${request.selector}`);
+        respond("Highlighted");
+      }
+      else if (request.action === 'click') {
+        const start = performance.now();
+        el.click();
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
         const duration = Math.round(performance.now() - start);
-        PerfMon.recordInteraction('type', duration);
-        respond(`Typed (ContentEditable, ${duration}ms)`);
-      } else {
-        el.value = request.text;
+        PerfMon.recordInteraction('click', duration);
+        respond(`Clicked (Internal: ${duration}ms)`);
+      }
+      else if (request.action === 'type') {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        const rect = el.getBoundingClientRect();
+
+        let label = `Typing: ${request.text}`;
+        if (el.type === 'password') {
+          label = "Typing: ••••••••";
+        }
+        createOverlay(rect, label);
+
+        const start = performance.now();
+        if (el.isContentEditable) {
+          el.focus();
+          document.execCommand('insertText', false, request.text);
+          const duration = Math.round(performance.now() - start);
+          PerfMon.recordInteraction('type', duration);
+          respond(`Typed (ContentEditable, ${duration}ms)`);
+        } else {
+          el.value = request.text;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          const duration = Math.round(performance.now() - start);
+          PerfMon.recordInteraction('type', duration);
+          respond(`Typed (${duration}ms)`);
+        }
+      }
+
+      else if (request.action === 'press_key') {
+        const start = performance.now();
+        const key = request.key;
+        const options = {
+          key: key,
+          code: key,
+          keyCode: key === 'Enter' ? 13 : 0,
+          which: key === 'Enter' ? 13 : 0,
+          bubbles: true,
+          cancelable: true,
+          view: window
+        };
+
+        el.dispatchEvent(new KeyboardEvent('keydown', options));
+        el.dispatchEvent(new KeyboardEvent('keypress', options));
+        el.dispatchEvent(new KeyboardEvent('keyup', options));
+
+        const duration = Math.round(performance.now() - start);
+        PerfMon.recordInteraction('press_key', duration);
+        respond(`Pressed ${key} (${duration}ms)`);
+      }
+      else if (request.action === 'hover') {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        const rect = el.getBoundingClientRect();
+        createOverlay(rect, "Hovering");
+
+        const eventOptions = {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2
+        };
+
+        el.dispatchEvent(new MouseEvent('mouseover', eventOptions));
+        el.dispatchEvent(new MouseEvent('mouseenter', eventOptions));
+        el.dispatchEvent(new MouseEvent('mousemove', eventOptions));
+
+        if (typeof PointerEvent !== 'undefined') {
+          el.dispatchEvent(new PointerEvent('pointerover', { ...eventOptions, pointerType: 'mouse' }));
+          el.dispatchEvent(new PointerEvent('pointerenter', { ...eventOptions, pointerType: 'mouse' }));
+          el.dispatchEvent(new PointerEvent('pointermove', { ...eventOptions, pointerType: 'mouse' }));
+        }
+
+        respond("Hovered");
+      }
+      else if (request.action === 'select_option') {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        createOverlay(el.getBoundingClientRect(), `Selecting: ${request.value}`);
+
+        el.value = request.value;
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
-        const duration = Math.round(performance.now() - start);
-        PerfMon.recordInteraction('type', duration);
-        respond(`Typed (${duration}ms)`);
+        respond("Option Selected");
       }
-    }
-
-    else if (request.action === 'press_key') {
-      const start = performance.now();
-      const key = request.key;
-      const options = {
-        key: key,
-        code: key,
-        keyCode: key === 'Enter' ? 13 : 0,
-        which: key === 'Enter' ? 13 : 0,
-        bubbles: true,
-        cancelable: true,
-        view: window
-      };
-
-      el.dispatchEvent(new KeyboardEvent('keydown', options));
-      el.dispatchEvent(new KeyboardEvent('keypress', options));
-      el.dispatchEvent(new KeyboardEvent('keyup', options));
-
-      const duration = Math.round(performance.now() - start);
-      PerfMon.recordInteraction('press_key', duration);
-      respond(`Pressed ${key} (${duration}ms)`);
-    }
-    else if (request.action === 'hover') {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      const rect = el.getBoundingClientRect();
-      createOverlay(rect, "Hovering");
-
-      const eventOptions = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2
-      };
-
-      el.dispatchEvent(new MouseEvent('mouseover', eventOptions));
-      el.dispatchEvent(new MouseEvent('mouseenter', eventOptions));
-      el.dispatchEvent(new MouseEvent('mousemove', eventOptions));
-
-      if (typeof PointerEvent !== 'undefined') {
-        el.dispatchEvent(new PointerEvent('pointerover', { ...eventOptions, pointerType: 'mouse' }));
-        el.dispatchEvent(new PointerEvent('pointerenter', { ...eventOptions, pointerType: 'mouse' }));
-        el.dispatchEvent(new PointerEvent('pointermove', { ...eventOptions, pointerType: 'mouse' }));
+      else if (request.action === 'get_html') {
+        respond(el.outerHTML);
       }
 
-      respond("Hovered");
+    } catch (e) {
+      respond({ error: e.toString() });
     }
-    else if (request.action === 'select_option') {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      createOverlay(el.getBoundingClientRect(), `Selecting: ${request.value}`);
+  })();
 
-      el.value = request.value;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      respond("Option Selected");
-    }
-    else if (request.action === 'get_html') {
-      respond(el.outerHTML);
-    }
-
-  } catch (e) {
-    respond({ error: e.toString() });
-  }
-})();
-
-return true; // Keep channel open
-    });
+  return true; // Keep channel open
+});
 
 // --- Markdown Converter ---
 function htmlToMarkdown(root) {

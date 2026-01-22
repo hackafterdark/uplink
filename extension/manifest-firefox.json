@@ -9,11 +9,24 @@
         "scripting",
         "storage",
         "offscreen",
-        "tabCapture"
+        "tabCapture",
+        "declarativeNetRequest",
+        "declarativeNetRequestWithHostAccess",
+        "webRequest",
+        "webRequestBlocking"
     ],
     "host_permissions": [
         "<all_urls>"
     ],
+    "declarative_net_request": {
+        "rule_resources": [
+            {
+                "id": "ruleset_1",
+                "enabled": true,
+                "path": "rules.json"
+            }
+        ]
+    },
     "background": {
         "scripts": [
             "background.js"

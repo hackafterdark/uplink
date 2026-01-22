@@ -207,6 +207,28 @@ function globToRegex(pattern) {
   return new RegExp(`^${finalParams}$`, 'i');
 }
 
+// --- MOZILLA/LIBREWOLF HEADER STRIPPING (Fallback for declarativeNetRequest) ---
+// Chrome MV3 bans blocking webRequest, but Firefox MV3 supports it.
+// We try to register it; if it fails (Chrome), we ignore.
+try {
+  if (api.webRequest && api.webRequest.onHeadersReceived) {
+    api.webRequest.onHeadersReceived.addListener(
+      (details) => {
+        const responseHeaders = details.responseHeaders.filter(h => {
+          const name = h.name.toLowerCase();
+          return name !== 'x-frame-options' && name !== 'content-security-policy' && name !== 'frame-options';
+        });
+        return { responseHeaders };
+      },
+      { urls: ["<all_urls>"] },
+      ["blocking", "responseHeaders"]
+    );
+    console.log("✅ Mozilla WebRequest Blocking Active: XFO/CSP stripping enabled.");
+  }
+} catch (e) {
+  console.log("ℹ️ WebRequest Blocking not supported (Chrome MV3 standard). Using DNR rules.");
+}
+
 function checkUrlAllowed(url) {
   if (!url) return true;
   try {
@@ -756,11 +778,34 @@ async function handleCommand(command) {
 
   if (command.action === "read") {
     try {
-      // 1. Execute getSnapshot in ALL frames
-      const results = await api.scripting.executeScript({
+      // 1. Helper: Snapshot Function
+      const getSnapshots = () => api.scripting.executeScript({
         target: { tabId: tabId, allFrames: true },
         func: () => (window.uplink ? window.uplink.getSnapshot() : null)
       });
+
+      // 2. First Attempt
+      let results = await getSnapshots();
+
+      // 3. Check for Main Frame Failure (Frame 0 missing or null)
+      const mainFrame = results.find(r => r.frameId === 0);
+      if (!mainFrame || !mainFrame.result) {
+        console.warn("Uplink missing in main frame. Attempting manual injection...");
+
+        // Manual Injection
+        try {
+          await api.scripting.executeScript({
+            target: { tabId: tabId, allFrames: true },
+            files: ['content.js']
+          });
+          // Wait for hydration
+          await new Promise(r => setTimeout(r, 500));
+          // Retry Snapshot
+          results = await getSnapshots();
+        } catch (injectErr) {
+          console.error("Manual injection failed:", injectErr);
+        }
+      }
 
       // 2. Aggregate and Namespace IDs
       let finalOutput = "";
@@ -772,7 +817,7 @@ async function handleCommand(command) {
 
         if (!diff) {
           // Diagnostic: Why is it empty?
-          diff = "(No content returned - likely window.uplink not initialized or frame is cross-origin restricted)";
+          diff = `(No content returned. Uplink status: ${frameResult.result === null ? 'Missing' : 'Empty'})`;
         } else {
           // Rewrite IDs: [123] -> [frameId::123]
           diff = diff.replace(/\[(\d+)\]/g, `[${frameId}::$1]`);

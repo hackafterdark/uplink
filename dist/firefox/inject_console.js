@@ -67,19 +67,85 @@
     capture('error', `Unhandled Promise Rejection: ${event.reason}`, event.reason?.stack);
   });
 
-  // Hook Fetch
+  // --- Network Capture ---
+  function captureNetwork(data) {
+    try {
+      window.dispatchEvent(new CustomEvent('mcp-network-log', {
+        detail: {
+          timestamp: Date.now(),
+          ...data
+        }
+      }));
+    } catch (e) { }
+  }
+  // --- NETWORK INTERACTION (Disabled for V1 stability) ---
+  /*
   const _fetch = window.fetch;
   window.fetch = async (...args) => {
     try {
       const response = await _fetch(...args);
-      if (!response.ok) {
-        capture('error', `Fetch Error: ${response.status} ${response.statusText}`, `URL: ${args[0]}`);
+      // Capture detailed response
+      let body = '[Opaque/Stream]';
+      const contentType = response.headers.get('content-type') || '';
+      
+      // Clone response to read body without consuming it
+      if (contentType.includes('json') || contentType.includes('text') || contentType.includes('xml')) {
+          try {
+                const clone = response.clone();
+                const text = await clone.text();
+                body = text.slice(0, 20000); // Limit to 20KB
+                if (text.length > 20000) body += '...[TRUNCATED]';
+            } catch (e) { body = `[Error reading body: ${e.message}]`; }
       }
+
+      capture('network', {
+        type: 'fetch',
+        method: args[1]?.method || 'GET',
+        url: args[0],
+        status: response.status,
+        response: body
+      });
+      
       return response;
     } catch (e) {
       capture('error', `Fetch Failed: ${e.message}`, `URL: ${args[0]}`);
       throw e;
     }
   };
+
+  const _open = XMLHttpRequest.prototype.open;
+  const _send = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this._method = method;
+    this._url = url;
+    return _open.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function(body) {
+    this.addEventListener('load', function() {
+        let responseBody = '[Opaque/Binary]';
+        try {
+            const contentType = this.getResponseHeader('content-type') || '';
+            if (this.responseType === '' || this.responseType === 'text') {
+                responseBody = this.responseText.slice(0, 20000);
+            } else if (this.responseType === 'json') {
+                responseBody = JSON.stringify(this.response).slice(0, 20000);
+            }
+        } catch(e) { responseBody = `[Error: ${e.message}]`; }
+
+        capture('network', {
+            type: 'xhr',
+            method: this._method,
+            url: this._url,
+            status: this.status,
+            response: responseBody
+        });
+    });
+    return _send.apply(this, arguments);
+  };
+  */
+
+  // Hook Fetch
 
 })();

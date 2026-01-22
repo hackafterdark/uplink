@@ -207,6 +207,28 @@ function globToRegex(pattern) {
   return new RegExp(`^${finalParams}$`, 'i');
 }
 
+// --- MOZILLA/LIBREWOLF HEADER STRIPPING (Fallback for declarativeNetRequest) ---
+// Chrome MV3 bans blocking webRequest, but Firefox MV3 supports it.
+// We try to register it; if it fails (Chrome), we ignore.
+try {
+  if (api.webRequest && api.webRequest.onHeadersReceived) {
+    api.webRequest.onHeadersReceived.addListener(
+      (details) => {
+        const responseHeaders = details.responseHeaders.filter(h => {
+          const name = h.name.toLowerCase();
+          return name !== 'x-frame-options' && name !== 'content-security-policy' && name !== 'frame-options';
+        });
+        return { responseHeaders };
+      },
+      { urls: ["<all_urls>"] },
+      ["blocking", "responseHeaders"]
+    );
+    console.log("✅ Mozilla WebRequest Blocking Active: XFO/CSP stripping enabled.");
+  }
+} catch (e) {
+  console.log("ℹ️ WebRequest Blocking not supported (Chrome MV3 standard). Using DNR rules.");
+}
+
 function checkUrlAllowed(url) {
   if (!url) return true;
   try {
@@ -756,16 +778,57 @@ async function handleCommand(command) {
 
   if (command.action === "read") {
     try {
-      // Forward to content script which has the new DOM Parser
-      const response = await api.tabs.sendMessage(tabId, command);
-      socket.send(JSON.stringify(response || "Page is empty"));
-    } catch (err) {
-      // Fallback if content script not loaded (e.g. restricted page)
-      if (err.message.includes("receiving end does not exist")) {
-        socket.send(JSON.stringify({ error: "Please reload the page to activate the extension." }));
-      } else {
-        socket.send(JSON.stringify({ error: err.message }));
+      // 1. Helper: Snapshot Function
+      const getSnapshots = () => api.scripting.executeScript({
+        target: { tabId: tabId, allFrames: true },
+        func: () => (window.uplink ? window.uplink.getSnapshot() : null)
+      });
+
+      // 2. First Attempt
+      let results = await getSnapshots();
+
+      // 3. Check for Main Frame Failure (Frame 0 missing or null)
+      const mainFrame = results.find(r => r.frameId === 0);
+      if (!mainFrame || !mainFrame.result) {
+        console.warn("Uplink missing in main frame. Attempting manual injection...");
+
+        // Manual Injection
+        try {
+          await api.scripting.executeScript({
+            target: { tabId: tabId, allFrames: true },
+            files: ['content.js']
+          });
+          // Wait for hydration
+          await new Promise(r => setTimeout(r, 500));
+          // Retry Snapshot
+          results = await getSnapshots();
+        } catch (injectErr) {
+          console.error("Manual injection failed:", injectErr);
+        }
       }
+
+      // 2. Aggregate and Namespace IDs
+      let finalOutput = "";
+      for (const frameResult of results) {
+        // if (!frameResult.result) continue; // Old behavior: skip empty
+
+        const frameId = frameResult.frameId;
+        let diff = frameResult.result;
+
+        if (!diff) {
+          // Diagnostic: Why is it empty?
+          diff = `(No content returned. Uplink status: ${frameResult.result === null ? 'Missing' : 'Empty'})`;
+        } else {
+          // Rewrite IDs: [123] -> [frameId::123]
+          diff = diff.replace(/\[(\d+)\]/g, `[${frameId}::$1]`);
+        }
+
+        finalOutput += `\n--- Frame ${frameId} ---\n` + diff;
+      }
+
+      socket.send(JSON.stringify(finalOutput.trim() || "Page is empty"));
+    } catch (err) {
+      socket.send(JSON.stringify({ error: err.message }));
     }
     return;
   }
@@ -850,17 +913,24 @@ async function handleCommand(command) {
     return;
   }
 
-  if (["click", "type", "highlight", "get_html", "wait_for", "press_key", "semantic_find"].includes(command.action)) {
+  if (["click", "type", "highlight", "get_html", "wait_for", "press_key", "semantic_find", "select_option", "hover"].includes(command.action)) {
     try {
       let targetFrameId = 0;
 
       if (command.selector) {
-        // If it's a numeric ID (Project Uplink), skip pre-check and assume Main Frame (0)
-        // because we can't querySelector an ID that only exists in the content script's memory.
-        if (/^\d+$/.test(command.selector)) {
+        // CASE 1: Namespaced ID (FrameId::ElementId)
+        if (/^\d+::\d+$/.test(command.selector)) {
+          const parts = command.selector.split('::');
+          targetFrameId = parseInt(parts[0]);
+          command.selector = parts[1]; // Strip frame ID for the content script
+        }
+        // CASE 2: Legacy/MainFrame ID
+        else if (/^\d+$/.test(command.selector)) {
           targetFrameId = 0;
-        } else {
-          // Standard CSS Selector: Find which frame contains the element
+        }
+        // CASE 3: CSS Selector
+        else {
+          // Find which frame contains the element
           const searchResults = await api.scripting.executeScript({
             target: { tabId: tabId, allFrames: true },
             func: (sel) => !!document.querySelector(sel),
@@ -881,12 +951,29 @@ async function handleCommand(command) {
         const start = Date.now();
 
         const poll = async () => {
-          const results = await api.scripting.executeScript({
-            target: { tabId: tabId, allFrames: true },
-            func: (sel) => !!document.querySelector(sel),
-            args: [command.selector]
-          });
-          if (results.some(r => r.result)) {
+          // For wait_for, we broadcast to ALL frames if it's a CSS selector, 
+          // OR target a specific frame if it's an ID.
+
+          let found = false;
+          if (/^\d+$/.test(command.selector)) {
+            // ID based wait - target specific frame
+            const results = await api.scripting.executeScript({
+              target: { tabId: tabId, frameIds: [targetFrameId] },
+              func: (id) => !!window.uplink.map.get(parseInt(id)),
+              args: [command.selector]
+            });
+            found = results[0]?.result;
+          } else {
+            // CSS based wait - check all frames
+            const results = await api.scripting.executeScript({
+              target: { tabId: tabId, allFrames: true },
+              func: (sel) => !!document.querySelector(sel),
+              args: [command.selector]
+            });
+            found = results.some(r => r.result);
+          }
+
+          if (found) {
             socket.send(JSON.stringify("Found element"));
           } else if (Date.now() - start > timeout) {
             socket.send(JSON.stringify({ error: "Timeout" }));
